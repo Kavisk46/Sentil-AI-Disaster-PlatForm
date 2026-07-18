@@ -1,0 +1,76 @@
+# SentinelAI local development infrastructure.
+#
+# During the foundation phase, this file provisions the shared infrastructure
+# (database and cache) that the backend, frontend, and AI services will depend
+# on once implemented. Application services (frontend/backend/ai) will be
+# added here as they are built out in Phase 2 (Backend), Phase 3 (Frontend),
+# and Phase 4 (AI Integration) — see PROJECT_ROADMAP.md.
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: sentinelai-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinelai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinelai}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinelai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - sentinelai-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinelai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cache:
+    image: redis:7-alpine
+    container_name: sentinelai-cache
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - sentinelai-cache-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # backend:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/backend.Dockerfile
+  #   depends_on:
+  #     - db
+  #     - cache
+  #   env_file: .env
+  #   ports:
+  #     - "8000:8000"
+  #   # Enabled in Phase 2 — Backend.
+
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/frontend.Dockerfile
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - "5173:5173"
+  #   # Enabled in Phase 3 — Frontend.
+
+  # ai:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/ai.Dockerfile
+  #   depends_on:
+  #     - db
+  #     - cache
+  #   env_file: .env
+  #   # Enabled in Phase 4 — AI Integration.
+
+volumes:
+  sentinelai-db-data:
+  sentinelai-cache-data:

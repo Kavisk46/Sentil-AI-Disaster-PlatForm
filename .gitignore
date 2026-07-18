@@ -216,3 +216,50 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ------------------------------------------------------------------
+# Node / Frontend
+# ------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+frontend/dist/
+frontend/build/
+
+# ------------------------------------------------------------------
+# Docker
+# ------------------------------------------------------------------
+*.pid
+docker/**/*.local.yml
+
+# ------------------------------------------------------------------
+# Datasets — raw imagery/data is not stored in Git (see datasets/README.md)
+# ------------------------------------------------------------------
+/datasets/*
+!/datasets/README.md
+!/datasets/samples/
+/datasets/samples/*
+!/datasets/samples/.gitkeep
+!/datasets/samples/README.md
+*.tif
+*.tiff
+*.geotiff
+
+# ------------------------------------------------------------------
+# Editors / OS
+# ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ------------------------------------------------------------------
+# Environment
+# ------------------------------------------------------------------
+.env.local
+.env.*.local
