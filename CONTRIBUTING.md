@@ -65,8 +65,8 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 **Examples:**
 
 ```
-feat(backend): add incident ingestion endpoint
-fix(routing): exclude edges flagged as impassable
+feat(api): add incident ingestion endpoint
+fix(web): exclude edges flagged as impassable from the route overlay
 docs(architecture): document AI engine data flow
 ```
 
@@ -74,19 +74,19 @@ Commits should be atomic and describe *why* a change was made when the reason is
 
 ## Coding Standards
 
-Standards are enforced per workstream. As each workstream is implemented, its specific linting and formatting tools will be wired into CI; the conventions below apply from the first line of code written in each area.
-
-**Backend (Python / FastAPI)**
-- Follow [PEP 8](https://peps.python.org/pep-0008/); format with `black` and lint with `ruff`.
-- Use type hints on all public functions and Pydantic models for request/response schemas.
+**Backend (`apps/api` — Python / FastAPI)**
+- Follow [PEP 8](https://peps.python.org/pep-0008/); format and lint with `ruff` (`ruff format .` / `ruff check .`).
+- Type-check with `mypy --strict`; every public function and Pydantic model must carry full type hints.
 - Prefer explicit, narrow exceptions over broad `except Exception` handling.
+- Follow Clean Architecture layering: `app/core` (settings/logging, no framework imports beyond what's needed), `app/api` (routers, versioned under `app/api/v1`), `app/middleware`, `app/schemas`. New business/domain logic should get its own layer rather than being added to routers directly.
 
-**Frontend (React / TypeScript)**
-- Format with `prettier`; lint with `eslint` using the project's shared configuration.
-- Prefer function components with explicit prop typing over `any`.
+**Frontend (`apps/web` — Next.js / React / TypeScript)**
+- Format with `prettier` (via the root `format` script); lint with `eslint` using the shared config in `packages/config`.
+- `strict` TypeScript is enforced repo-wide (`packages/config/typescript/base.json`); avoid `any`.
+- Server state (API data) belongs in TanStack Query; client-only UI state belongs in a Zustand store (`src/store/`) — don't duplicate one in the other.
 - Co-locate component styles and tests with the component they belong to.
 
-**AI (Python / PyTorch)**
+**AI (`packages/ai` — Python / PyTorch, from Phase 4)**
 - Follow the same Python standards as the backend.
 - Document model inputs, outputs, and expected tensor shapes in docstrings.
 - Keep data preprocessing, training, and inference code in clearly separated modules.
@@ -98,8 +98,10 @@ Standards are enforced per workstream. As each workstream is implemented, its sp
 
 ## Folder Organization
 
-The repository is organized by workstream at the top level (`frontend/`, `backend/`, `ai/`), with shared concerns kept outside those directories:
+The repository is an npm-workspaces monorepo organized by app and shared package:
 
+- `apps/` — deployable applications: `web` (frontend) and `api` (backend). Each owns its full dependency manifest (`package.json` / `pyproject.toml`).
+- `packages/` — code shared across apps: `shared` (TypeScript types), `config` (lint/format/tsconfig presets), `ai` (reserved for the future Python AI engine).
 - `docs/` — all project documentation, organized by topic (architecture, API, research).
 - `datasets/` — dataset documentation and small sample data only; large raw datasets are never committed (see `datasets/README.md`).
 - `docker/` — one Dockerfile per service, referenced by the root `docker-compose.yml`.

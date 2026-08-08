@@ -111,23 +111,28 @@ Detailed architecture documentation lives in [`docs/architecture/`](docs/archite
 
 | Layer | Technology |
 |---|---|
-| **Frontend** | React, TypeScript, Vite, Tailwind CSS, MapLibre GL |
-| **Backend** | Python, FastAPI, Pydantic, async SQLAlchemy |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS v4, shadcn/ui, TanStack Query, Zustand |
+| **Backend** | Python 3.12, FastAPI, Pydantic v2, Uvicorn |
 | **AI** | PyTorch, geospatial CV models, LLM-based briefing generation |
 | **Database** | PostgreSQL with PostGIS for geospatial data |
 | **Maps** | MapLibre GL JS, OpenStreetMap tiles, GeoJSON overlays |
 | **Deployment** | Docker, Docker Compose, GitHub Actions CI/CD |
 
-> The stack above reflects the intended architecture for the platform. Implementation begins in the phases described in [`PROJECT_ROADMAP.md`](PROJECT_ROADMAP.md); this repository currently defines the foundation those phases will build on.
+> The Database, Maps, and AI rows describe the intended architecture for later phases (see [`PROJECT_ROADMAP.md`](PROJECT_ROADMAP.md)); Frontend and Backend are implemented as of Sprint 1.
 
 ## Repository Structure
 
 ```
 sentinel-ai/
 │
-├── frontend/                 # React/TypeScript client application
-├── backend/                  # FastAPI backend services and APIs
-├── ai/                        # Computer vision & generative AI engine
+├── apps/
+│   ├── web/                    # Next.js frontend (App Router)
+│   └── api/                    # FastAPI backend (Clean Architecture)
+│
+├── packages/
+│   ├── shared/                  # Shared TypeScript types, consumed by frontend apps
+│   ├── config/                  # Shared ESLint / Prettier / tsconfig presets
+│   └── ai/                      # Reserved for the Python AI engine (Phase 4)
 │
 ├── datasets/                  # Dataset documentation & sample data (raw data not committed)
 │   ├── samples/
@@ -150,27 +155,42 @@ sentinel-ai/
 ├── CODE_OF_CONDUCT.md
 ├── CHANGELOG.md
 ├── LICENSE
+├── package.json                 # npm workspaces root (apps/web, packages/*)
 ├── docker-compose.yml
 └── PROJECT_ROADMAP.md
 ```
 
 ## Installation
 
-> SentinelAI is currently in the **foundation** phase of development. The instructions below describe the intended setup workflow and will become fully operational as `frontend/`, `backend/`, and `ai/` are implemented in upcoming phases (see [`PROJECT_ROADMAP.md`](PROJECT_ROADMAP.md)).
+Prerequisites: Node.js ≥ 20, Python 3.12, and (optionally) Docker.
+
+### Run locally
 
 ```bash
 # Clone the repository
 git clone https://github.com/<your-org>/sentinel-ai.git
 cd sentinel-ai
 
-# Copy environment configuration
+# --- Backend ---
+cd apps/api
+python -m venv .venv
+.venv/Scripts/activate            # macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
 cp .env.example .env
+uvicorn app.main:app --reload     # http://localhost:8000 (docs at /docs)
 
-# Start local infrastructure (database, cache)
-docker compose up -d
+# --- Frontend (in a second terminal, from the repo root) ---
+npm install                       # installs the whole workspace
+cp apps/web/.env.example apps/web/.env.local
+npm run dev                       # http://localhost:3000
+```
 
-# Backend and frontend setup instructions will be added
-# as those services are implemented (Phase 2 and Phase 3).
+### Run with Docker Compose
+
+```bash
+cp apps/api/.env.example apps/api/.env
+docker compose up --build
+# API: http://localhost:8000 · Web: http://localhost:3000
 ```
 
 ## Development Roadmap

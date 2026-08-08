@@ -14,19 +14,23 @@ detected damage, requesting rescue routes, and reading generated briefings.
 - Provide an incident/mission console that ties map, briefing, and routing
   views together into a single operational workflow.
 
-## Intended Structure
+## Structure
 
-The frontend is a React and TypeScript single-page application, built with
-Vite and styled with Tailwind CSS. Mapping is handled by MapLibre GL JS
-rendering GeoJSON layers served by the backend API.
+The frontend (`apps/web`) is a Next.js 15 App Router application written in
+strict TypeScript and styled with Tailwind CSS v4 and shadcn/ui. Mapping
+will be handled by MapLibre GL JS rendering GeoJSON layers served by the
+backend API, once map views are built in Phase 5.
 
-Planned top-level organization within `frontend/`:
+Top-level organization within `apps/web/src`:
 
-- **Routes/pages** — top-level views (map dashboard, incident console, briefing viewer).
-- **Components** — reusable presentational and container components.
-- **Map layers** — MapLibre layer and source configuration for imagery, damage, and route overlays.
-- **API client** — a typed client generated from or matching the backend's API contract.
-- **State management** — client state for the current incident, selected region, and active overlays.
+- **`app/`** — App Router routes (map dashboard, incident console, briefing viewer land here as they're built).
+- **`components/ui`** — shadcn/ui primitives; **`components/providers`** — the app's provider composition (theme, TanStack Query).
+- **`store/`** — Zustand stores for client-only UI state (not server data).
+- **`hooks/`** — TanStack Query hooks wrapping the typed API client in `lib/api-client.ts`.
+- **`lib/`** — framework-agnostic utilities (class-name merging, the API client).
+
+Cross-app types (e.g. shapes mirroring backend response schemas) live in
+`packages/shared`, not duplicated inside `apps/web`.
 
 ## Key Interactions with Other Subsystems
 
@@ -36,4 +40,7 @@ Planned top-level organization within `frontend/`:
 
 ## Status
 
-Frontend implementation begins in **Phase 3** of [`PROJECT_ROADMAP.md`](../../PROJECT_ROADMAP.md). This document will be expanded with concrete component and state-management conventions as that phase begins.
+The engineering foundation — App Router shell, providers, theming, and an
+empty dashboard route — was delivered in Sprint 1. Operational views (map,
+briefings, routing) are built out starting in **Phase 3** of
+[`PROJECT_ROADMAP.md`](../../PROJECT_ROADMAP.md).

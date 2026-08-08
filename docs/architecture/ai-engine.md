@@ -21,7 +21,7 @@ synthesis. Detection and generation are treated as independently swappable
 stages behind a stable internal interface, so improved models can be adopted
 without requiring changes to the backend or frontend.
 
-Planned top-level organization within `ai/`:
+Planned top-level organization within `packages/ai/`:
 
 - **Preprocessing** — imagery normalization, tiling, and georeferencing prior
   to inference.

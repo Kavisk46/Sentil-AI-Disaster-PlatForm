@@ -1,8 +1,9 @@
 # Scripts
 
 This directory holds developer and operational scripts shared across the
-`frontend/`, `backend/`, and `ai/` workstreams — for example, environment
-setup, database seeding, and local data synchronization utilities.
+`apps/web`, `apps/api`, and `packages/ai` workstreams — for example,
+environment setup, database seeding, and local data synchronization
+utilities.
 
 No scripts have been added yet; they will be introduced alongside the
 workstream each one supports, starting with backend environment setup in

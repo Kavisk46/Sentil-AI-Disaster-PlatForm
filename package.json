@@ -1,0 +1,22 @@
+{
+  "name": "sentinelai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SentinelAI monorepo — AI-Powered Disaster Intelligence Platform.",
+  "workspaces": ["apps/web", "packages/shared", "packages/config"],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "start": "npm run start --workspace=apps/web",
+    "lint": "npm run lint --workspace=apps/web",
+    "typecheck": "npm run typecheck --workspace=apps/web && npm run typecheck --workspace=packages/shared",
+    "format": "prettier --write . --ignore-path .gitignore"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "prettier-plugin-tailwindcss": "^0.6.11"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

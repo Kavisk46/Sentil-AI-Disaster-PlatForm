@@ -15,22 +15,22 @@ engine and routing subsystem.
 - Coordinate asynchronous processing jobs handed off to the AI engine
   (detection, briefing generation) and the routing subsystem.
 
-## Intended Structure
+## Structure
 
-The backend is a Python service built on FastAPI, using Pydantic for request
-and response validation and async SQLAlchemy for data access against a
-PostgreSQL/PostGIS database.
+The backend (`apps/api`) is a Python 3.12 service built on FastAPI, using
+Pydantic v2 for request/response validation. It follows a Clean
+Architecture layering so framework, configuration, and API concerns stay
+separated from the domain and persistence logic added from Phase 2 onward:
 
-Planned top-level organization within `backend/`:
+- **`app/core`** — settings (`pydantic-settings`), logging configuration, and constants. No FastAPI imports here.
+- **`app/api`** — versioned routers (`app/api/v1`) and their endpoint modules; `/health` is deliberately kept unversioned.
+- **`app/middleware`** — CORS policy and request-logging middleware.
+- **`app/schemas`** — Pydantic response models. Currently infrastructure-only (`HealthResponse`, `ServiceInfoResponse`); domain schemas (incident, imagery, detection, route, briefing) are added once persistence work begins.
+- **`app/main.py`** — the application factory (`create_app()`) that wires settings, logging, middleware, and routers together in one place.
 
-- **API layer** — versioned route definitions and request/response schemas.
-- **Domain models** — incident, imagery, detection, route, and briefing
-  entities, including their geospatial representations.
-- **Persistence layer** — database access and migrations.
-- **Job coordination** — interfaces for dispatching work to the AI engine and
-  routing subsystem and receiving results.
-- **Configuration & observability** — structured logging, health checks, and
-  environment-based configuration.
+Persistence (PostgreSQL/PostGIS via async SQLAlchemy) and the job
+coordination layer for dispatching work to the AI engine and routing
+subsystem are added starting in Phase 2 — no database is present yet.
 
 ## Key Interactions with Other Subsystems
 
@@ -47,4 +47,7 @@ The concrete API surface is documented in [`docs/api/endpoints.md`](../api/endpo
 
 ## Status
 
-Backend implementation begins in **Phase 2** of [`PROJECT_ROADMAP.md`](../../PROJECT_ROADMAP.md). This document will be expanded with concrete schema and endpoint detail as that phase begins.
+The engineering foundation — app factory, settings, logging, CORS,
+request-logging middleware, API versioning, and `/health` — was delivered
+in Sprint 1. Domain models, persistence, and business endpoints are added
+starting in **Phase 2** of [`PROJECT_ROADMAP.md`](../../PROJECT_ROADMAP.md).

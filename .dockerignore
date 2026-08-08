@@ -1,0 +1,17 @@
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+.git
+.github
+docs
+datasets
+scripts
+*.md
+.env
+**/.env
+!**/.env.example

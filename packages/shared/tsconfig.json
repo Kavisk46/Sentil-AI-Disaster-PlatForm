@@ -1,0 +1,7 @@
+{
+  "extends": "@sentinelai/config/typescript/base",
+  "compilerOptions": {
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

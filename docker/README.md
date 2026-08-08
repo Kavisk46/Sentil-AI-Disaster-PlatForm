@@ -1,19 +1,27 @@
 # Docker
 
 This directory holds the Dockerfile for each SentinelAI service, referenced
-by the root [`docker-compose.yml`](../docker-compose.yml).
+by the root [`docker-compose.yml`](../docker-compose.yml). Every Dockerfile
+uses the repository root as its build context (not its own subdirectory),
+since the frontend is part of an npm workspaces monorepo and needs access to
+`packages/` at build time.
 
-| Dockerfile | Service | Added in |
+| Dockerfile | Service | Status |
 |---|---|---|
-| `backend.Dockerfile` | Backend API service | Phase 2 — Backend |
-| `frontend.Dockerfile` | Frontend web application | Phase 3 — Frontend |
-| `ai.Dockerfile` | AI engine (detection & briefing generation) | Phase 4 — AI Integration |
+| `api.Dockerfile` | Backend API (`apps/api`) | Implemented — Sprint 1 |
+| `web.Dockerfile` | Frontend web application (`apps/web`) | Implemented — Sprint 1 |
+| `ai.Dockerfile` | AI engine (detection & briefing generation) | Not yet implemented — Phase 4 |
 
-No Dockerfiles exist yet. The root `docker-compose.yml` currently provisions
-only the shared infrastructure (PostgreSQL/PostGIS and Redis) that these
-services will depend on once implemented; the application service
-definitions are present in that file as commented-out scaffolding, ready to
-be enabled as each Dockerfile above is added.
+Sprint 1 provisions the frontend and backend only; no database or cache is
+part of the stack yet. PostgreSQL/PostGIS will be added here alongside the
+domain models introduced in Phase 2 — see
+[`PROJECT_ROADMAP.md`](../PROJECT_ROADMAP.md).
 
-See [`PROJECT_ROADMAP.md`](../PROJECT_ROADMAP.md) for the phase in which each
-service — and its corresponding Dockerfile — is implemented.
+## Running locally
+
+```bash
+docker compose up --build
+```
+
+- API: http://localhost:8000 (docs at `/docs`)
+- Web: http://localhost:3000
