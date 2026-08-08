@@ -12,6 +12,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.exception_handlers import register_exception_handlers
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging, get_logger
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
 
     add_cors_middleware(app, settings)
     app.add_middleware(RequestLoggingMiddleware)
+    register_exception_handlers(app)
 
     # Single include point: `api_router` aggregates root, health, and every
     # versioned API — see app/api/router.py.

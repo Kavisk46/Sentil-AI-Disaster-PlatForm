@@ -7,6 +7,7 @@ re-reading the environment on every access.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import field_validator
@@ -57,6 +58,13 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
 
+    # Image ingestion (Milestone 2). UPLOAD_DIR is a local, gitignored,
+    # development-only location — see app/services/file_storage.py, which
+    # keeps this behind an interface so it can be swapped for object storage
+    # (S3/R2/GCS) later without an API change.
+    UPLOAD_DIR: Path = Path("storage/uploads")
+    MAX_UPLOAD_SIZE_MB: int = 10
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def _split_cors_origins(cls, value: str | list[str]) -> list[str]:
@@ -68,6 +76,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
+
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 
 @lru_cache
