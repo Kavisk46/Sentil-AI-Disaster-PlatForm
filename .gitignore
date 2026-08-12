@@ -250,6 +250,14 @@ docker/**/*.local.yml
 *.geotiff
 
 # ------------------------------------------------------------------
+# Backend local runtime storage — uploaded images (Milestone 2 — image
+# ingestion). Development-only; see apps/api/app/core/config.py UPLOAD_DIR
+# and apps/api/README.md. Not the same thing as datasets/ above: this is
+# runtime user-uploaded content, never committed sample/reference data.
+# ------------------------------------------------------------------
+apps/api/storage/
+
+# ------------------------------------------------------------------
 # Editors / OS
 # ------------------------------------------------------------------
 .DS_Store

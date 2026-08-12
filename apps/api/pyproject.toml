@@ -10,6 +10,13 @@ dependencies = [
     "pydantic-settings>=2.5,<3.0",
     "python-multipart>=0.0.9,<1.0",
     "Pillow>=11.0,<13.0",
+    # CPU-only. Install from the PyTorch CPU index, e.g.:
+    #   pip install -e ".[dev]" --extra-index-url https://download.pytorch.org/whl/cpu
+    # Plain PyPI wheels for these can bundle CUDA; this project never needs
+    # that and the code never installs/downloads CUDA-enabled weights or a
+    # GPU-only artifact regardless — see apps/api/README.md.
+    "torch>=2.8,<3.0",
+    "torchvision>=0.19,<1.0",
 ]
 
 [project.optional-dependencies]

@@ -45,3 +45,12 @@ Instructions for connecting to and syncing full-size datasets from external
 storage will be documented here once the data ingestion pipeline is
 implemented (see Phase 2 and Phase 4 in
 [`PROJECT_ROADMAP.md`](../PROJECT_ROADMAP.md)).
+
+**xBD/xView2** (the primary research dataset for damage detection) is the
+first concrete case: download it yourself from the dataset maintainers and
+place it under `datasets/xbd/` (or anywhere — the path is configured
+explicitly, not assumed). See
+[`apps/api/README.md`](../apps/api/README.md#dataset-pipeline-milestone-3b)
+for the expected on-disk layout, the dataset-loading code that reads it
+(`apps/api/app/ml/datasets/`), and why it's never downloaded automatically
+or committed here.

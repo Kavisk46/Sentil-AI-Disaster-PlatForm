@@ -43,3 +43,34 @@ Planned components within the routing subsystem:
 ## Status
 
 Routing implementation begins in **Phase 5** of [`PROJECT_ROADMAP.md`](../../PROJECT_ROADMAP.md), building on the damage detection output delivered in Phase 4. Confidence-aware routing is tracked as a research extension in [`docs/research/future-work.md`](../research/future-work.md).
+
+**Network ingestion has an early foundation** (Milestone 6A, ahead of Phase
+5 proper): a directed graph representation (`RoadNode`/`RoadEdge`),
+buildable from real OpenStreetMap data via the Overpass API, with every
+edge carrying a `base_cost` (today: exactly distance) and placeholder
+`risk_score`/`accessibility` fields the future "hazard overlay" component
+will populate. See [`apps/api/README.md`](../../apps/api/README.md#road-network-milestone-6a)
+for the full design.
+
+**Hazard overlay has a first, explicitly heuristic pass** (Milestone 6B):
+`GET /api/v1/analysis/{id}/road-risk` correlates georeferenced damage
+predictions with nearby road edges (proximity-weighted by damage severity
+and detection confidence) into a `risk_score`/`risk_level` per edge, kept
+strictly separate from `accessibility` (risk is never treated as
+blockage). See
+[`apps/api/README.md`](../../apps/api/README.md#road-risk-model-milestone-6b)
+for the full baseline heuristic formula and its documented limitations.
+
+**Route computation has a first version** (Milestone 6C):
+`POST /api/v1/routing` computes a `distance_only` (shortest-distance
+control condition) or `risk_aware` route via Dijkstra (optionally A*,
+with an admissible geographic heuristic), reusing Milestone 6B's
+risk-adjusted cost formula unmodified and respecting accessibility
+(`open`/`restricted`/`blocked`/`unknown`) as a concept kept separate from
+risk. A route comparison capability (`distance_only` vs `risk_aware` for
+the same start/destination, with distance/risk differences and a detour
+ratio) exists at the service level. **Still not implemented:** multi-stop
+routing, alternate-route ranking, live navigation, traffic-aware
+routing, and any LLM-generated route explanation. See
+[`apps/api/README.md`](../../apps/api/README.md#risk-aware-rescue-routing-milestone-6c)
+for the full algorithm choice, cost formulas, and research metrics.

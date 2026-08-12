@@ -45,7 +45,10 @@ def test_upload_accepts_supported_image_types(
     assert response.status_code == 201
     body = response.json()
     assert uuid.UUID(body["analysis_id"])
-    assert body["status"] == "uploaded"
+    # "queued", not "uploaded": Milestone 4 immediately dispatches the
+    # analysis for processing before this response is returned — see
+    # apps/api/README.md ("Analysis lifecycle").
+    assert body["status"] == "queued"
     assert body["filename"] == filename
     # No storage path, content type, or size leaked into the response.
     assert set(body.keys()) == {"analysis_id", "status", "filename"}

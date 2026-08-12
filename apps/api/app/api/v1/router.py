@@ -11,10 +11,12 @@ depending on inclusion order elsewhere.
 
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import analysis, status, system
+from app.api.v1.endpoints import analysis, roads, routing, status, system
 from app.core.constants import API_V1_PREFIX
 
 api_v1_router = APIRouter(prefix=API_V1_PREFIX, tags=["v1"])
 status.register(api_v1_router)
 api_v1_router.include_router(system.router)
 api_v1_router.include_router(analysis.router)
+api_v1_router.include_router(roads.router)
+api_v1_router.include_router(routing.router)

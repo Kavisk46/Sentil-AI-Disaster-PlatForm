@@ -60,6 +60,7 @@ class AnalysisService:
 
         self._file_storage.save(storage_name=storage_name, content=content)
 
+        now = datetime.now(UTC)
         record = AnalysisRecord(
             analysis_id=analysis_id,
             status=AnalysisStatus.UPLOADED,
@@ -67,7 +68,8 @@ class AnalysisService:
             storage_name=storage_name,
             content_type=upload.content_type or "",
             size_bytes=len(content),
-            created_at=datetime.now(UTC),
+            created_at=now,
+            updated_at=now,
         )
         self._repository.create(record)
 

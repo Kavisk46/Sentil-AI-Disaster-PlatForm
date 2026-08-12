@@ -8,6 +8,7 @@ own try/except. Registered once, in `app/main.py`.
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
+from app.services.analysis_repository import AnalysisNotFoundError
 from app.services.exceptions import (
     ImageTooLargeError,
     InvalidImageContentError,
@@ -16,6 +17,15 @@ from app.services.exceptions import (
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(AnalysisNotFoundError)
+    async def _handle_analysis_not_found(
+        _: Request, exc: AnalysisNotFoundError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"detail": str(exc)},
+        )
+
     @app.exception_handler(UnsupportedImageTypeError)
     async def _handle_unsupported_image_type(
         _: Request, exc: UnsupportedImageTypeError
