@@ -378,6 +378,69 @@ near the requested coordinates, no georeferenced damage data for
 **Errors:** `404` (no analysis with that id), `422` (invalid
 `start`/`destination` coordinates, or a missing/invalid `mode`).
 
+### `GET /api/v1/analysis/{analysis_id}/summary` — AI-assisted incident briefing
+
+Synthesizes a completed analysis's damage/road-risk/(optionally) routing
+results into a short, structured operational summary — see "AI incident
+intelligence," below, for the full architecture, grounding, and safety
+model. Always `200` for a known `analysis_id`; every field is either a
+real, deterministically-computed value or "Information unavailable." —
+never an invented one. No route context (GET takes no body) — use `POST`
+on the same path for that.
+
+```bash
+curl http://localhost:8000/api/v1/analysis/5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10/summary
+```
+
+**Response `200`**
+
+```json
+{
+  "analysis_id": "5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10",
+  "incident_severity": "high",
+  "affected_structures": { "total": 12, "damaged": 9, "severely_damaged": 6, "destroyed": 2, "high_priority_count": 6 },
+  "priority_area": "6 high-priority structure(s) were identified, within the approximate bounding area [20.10, 10.10] to [20.30, 10.40].",
+  "route_summary": "Information unavailable.",
+  "key_findings": ["12 structure(s) assessed: 9 damaged, 2 destroyed.", "Average detection confidence: 0.81."],
+  "limitations": ["Damage predictions may be inaccurate.", "Road risk is a modeled estimate based on proximity to detected damage, not a verified fact.", "Road accessibility (blocked/restricted) has not been independently confirmed.", "No route was requested or available for this incident."],
+  "confidence": "high",
+  "generated_at": "2026-08-13T12:00:00Z",
+  "source": "fallback",
+  "prompt_version": "incident_summary_v1",
+  "disclaimer": "This briefing is AI-assisted decision support, not a verified emergency assessment. Damage predictions may be wrong. Road risk is a modeled estimate, not a confirmed fact. Road accessibility has not been independently verified. Real emergency response decisions must rely on authoritative, verified information — not this summary alone."
+}
+```
+
+`source: "fallback"` above means the configured `LLMProvider` either
+isn't set (default: `deterministic`, see below) or failed/timed
+out/returned malformed or unsupported output, and the deterministic
+template summarizer produced this narrative instead — the response shape
+is identical either way.
+
+**Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't a
+valid UUID).
+
+### `POST /api/v1/analysis/{analysis_id}/summary` — regenerate a briefing (optional route context)
+
+Same response shape as `GET`, with an optional `route` body to also
+factor a `risk_aware`-vs-`distance_only` route comparison into the
+briefing (via `RoutingService.compare_routes()`, Milestone 6C) — an empty
+or absent body is equivalent to `GET`.
+
+```bash
+curl -X POST http://localhost:8000/api/v1/analysis/5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10/summary \
+  -H "Content-Type: application/json" \
+  -d '{
+    "route": {
+      "start": { "latitude": 10.0, "longitude": 20.0 },
+      "destination": { "latitude": 9.99, "longitude": 20.002 }
+    }
+  }'
+```
+
+**Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't a
+valid UUID, or `route` is present with invalid coordinates).
+
 ### Local storage
 
 Uploaded files are written to `UPLOAD_DIR` (default `storage/uploads`,
@@ -1548,6 +1611,233 @@ tracking. Route *optimization* beyond the two modes described above (no
 multi-stop routing, no alternate-route ranking) is also out of scope.
 All later milestones.
 
+## AI incident intelligence (Milestone 7)
+
+```
+API -> IncidentIntelligenceService -> Context Builder -> LLM Provider
+    -> Schema Validation -> Incident Briefing
+```
+
+Converts SentinelAI's already-computed, deterministic results (damage —
+Milestones 3/5, road risk — Milestone 6B, routing — Milestone 6C) into a
+short, structured operational summary for a rescue coordinator.
+Implemented in `app/incident/` (the pipeline itself) plus
+`app/services/incident_intelligence_service.py` (DI-facing orchestration,
+matching every other `*Service` in this codebase).
+
+### Why an LLM is used
+
+Turning a page of counts, ratios, and edge lists into a readable sentence
+is a genuine language task — exactly what an LLM is good at, and tedious
+to hand-write as string templates for every possible combination of
+available/unavailable data. This is a **communication and synthesis
+layer only**.
+
+### Why the LLM is not the decision-maker
+
+Every decision this milestone specifies as off-limits to the LLM
+(damage classification, coordinates, road risk, route selection, hazard
+prediction) is already made by earlier milestones before the LLM is ever
+invoked. This is enforced **structurally**, not by instruction alone:
+
+- `LLMNarrativeOutput` (`app/incident/schemas.py`) — the *only* type an
+  `LLMProvider` is trusted to produce — has exactly four free-text
+  fields (`priority_area`, `route_summary`, `key_findings`,
+  `limitations`). It has no `incident_severity`/`confidence`/
+  `affected_structures` fields at all, so there is nothing for a
+  misbehaving provider to fabricate there even if it tried — Pydantic's
+  `model_validate` simply ignores unrecognized keys.
+- `IncidentBriefing.incident_severity`/`.confidence`/`.affected_structures`
+  are always computed by `app.incident.severity`, directly from
+  `IncidentContext`'s real numbers (`app.incident.briefing_builder`),
+  never read from the narrative.
+- `IncidentContext` (the *only* input an LLM ever sees) is itself built
+  entirely from already-computed Milestone 3/5/6B/6C output
+  (`app.incident.context_builder`) — no new analysis, no re-derivation,
+  and structurally no way for the LLM to be asked to *decide* anything.
+
+### Context schema
+
+`IncidentContext` (`app/incident/schemas.py`), built by
+`build_incident_context()`:
+
+- **`damage`** (`DamageContext`) — `total_buildings`/`damaged_buildings`/
+  `severely_damaged`/`destroyed` (reused `DamageSummary`, Milestone 3),
+  mean `BuildingDamage.confidence`, up to `INCIDENT_MAX_LISTED_STRUCTURE_IDS`
+  high-priority structure IDs (reused `is_high_priority()`, Milestone 5),
+  and a bounding box over georeferenced buildings only (reused
+  `BoundingBoxGeometry`/`representative_point()`, Milestone 5).
+- **`road_risk`** (`RoadRiskContext`) — edge counts by risk level and
+  accessibility, the highest risk level seen, and a sample of
+  contributing building IDs (from Milestone 6B's `RoadEdge.risk_sources`).
+- **`route`** (`RouteContext`) — `selected_*` (the `risk_aware` route)
+  vs. `baseline_*` (`distance_only`), detour ratio, and avoided high-risk
+  segment count — a direct mapping of Milestone 6C's `RouteComparison`.
+
+Every sub-context has `available: bool` + `reason: str | None`; when
+`available=False`, every other field stays at its empty default — never
+a fabricated value. `route` is only populated if the caller explicitly
+requests it (`POST .../summary` with a `route` body) — this package has
+no way to invent a start/destination.
+
+### Incident briefing schema
+
+`IncidentBriefing` (`app/incident/schemas.py`) — the response of both
+`GET`/`POST /api/v1/analysis/{analysis_id}/summary`: `incident_severity`,
+`affected_structures`, `priority_area`, `route_summary`, `key_findings`,
+`limitations`, `confidence`, `generated_at`, `source`
+(`"provider"`/`"fallback"`), `prompt_version`, and a fixed `disclaimer`
+(see "Safety controls," below).
+
+### LLM provider abstraction
+
+`LLMProvider` (`app/incident/provider.py`) is a `Protocol` with one
+method, `generate_incident_summary(context) -> str` — the same
+structural, duck-typed DI seam this codebase already uses for
+`DamageModel`/`BuildingLocalizer`/`RoadNetworkSource`. Nothing in
+`IncidentIntelligenceService` or the API layer imports a concrete
+provider; `app/api/deps.py`'s `get_llm_provider()` is the only place that
+branches on `Settings.LLM_PROVIDER` (`"deterministic"` | `"mock"` |
+`"anthropic"`):
+
+| Provider | File | Network/API key |
+|---|---|---|
+| `DeterministicSummaryProvider` (default) | `app/incident/fallback.py` | None — pure template |
+| `MockLLMProvider` | `app/incident/mock_provider.py` | None — test-only, configurable failure modes |
+| `AnthropicLLMProvider` | `app/incident/anthropic_provider.py` | Real Anthropic API call |
+
+Adding OpenAI or a local Hugging Face model is a new file implementing
+`generate_incident_summary()` plus one new branch in `get_llm_provider()`
+— no change anywhere else.
+
+### Prompt design
+
+`PROMPT_VERSION = "incident_summary_v1"` (`app/incident/prompt.py`),
+stamped onto every `IncidentBriefing` so a future evaluation can compare
+results across prompt changes. `SYSTEM_PROMPT` instructs the model to:
+summarize damage, identify the priority area, explain route selection,
+summarize road risk, call out uncertainty, list minimum limitations, and
+— critically — **never** state casualties, injuries, deaths, exact
+coordinates, official road closures, weather, emergency instructions,
+evacuation orders, or hazard timing, using "Information unavailable."
+instead. Output must be exactly the four `LLMNarrativeOutput` fields as a
+single JSON object, no prose outside it.
+
+### Structured grounding / prompt injection defense
+
+`IncidentContext` deliberately contains **no free text a user
+controls** — no filenames, no arbitrary uploaded strings — the safest
+defense against prompt injection is to never place untrusted text where
+a model might treat it as instructions. `build_user_message()`
+additionally wraps the context in explicit `<incident_context>...
+</incident_context>` delimiters with an instruction that the block is
+DATA, never instructions — defense in depth on top of the structural
+exclusion.
+
+### Hallucination controls
+
+Four independent layers, each imperfect alone:
+
+1. **Prompt instructions** (above) — a request, not a guarantee.
+2. **Structural exclusion** of untrusted free text from the context.
+3. **`app.incident.grounding.filter_unsupported_claims()`** — a
+   keyword/pattern filter (not semantic understanding) run on every
+   narrative regardless of how well the model followed its prompt.
+   Rejects any of the four free-text fields containing a banned topic
+   (casualties/deaths/injuries, tsunami, flood, evacuation, weather,
+   road closures) or an invented-looking coordinate (4+ decimal places
+   — `IncidentContext` never gives the model raw lat/lon to legitimately
+   quote). Deliberately allows "blocked"/"restricted" through — this
+   system's own grounded `AccessibilityStatus` vocabulary, not an
+   invented claim. Rejection discards the *entire* narrative (never
+   tries to surgically edit prose) and falls through to the fallback.
+4. **Deterministic fallback** (below) — the backstop that can only ever
+   state what's really in the context.
+
+### Deterministic fallback
+
+`build_fallback_narrative()` (`app/incident/fallback.py`) is a pure,
+template-based function of `IncidentContext` — no LLM, no network. Used
+in two ways: as the actual configured provider
+(`DeterministicSummaryProvider`, `Settings.LLM_PROVIDER` default) so
+SentinelAI works fully offline with zero configuration, *and* as the
+automatic fallback whenever another provider fails, times out, returns
+malformed JSON, or fails the grounding filter
+(`IncidentIntelligenceService._get_narrative()`: generate -> parse ->
+ground -> assemble, falling back at any failed stage). `source` on the
+response distinguishes which happened — the briefing shape is identical
+either way, so a caller never sees a 500 or a partial result because an
+LLM was unavailable.
+
+### Confidence and uncertainty
+
+`ConfidenceLevel` (`classify_confidence()`, `app/incident/severity.py`)
+is a threshold on the mean of real `BuildingDamage.confidence` values —
+never an LLM's self-reported confidence, and never conflated with
+`IncidentSeverity` (also computed independently, from
+destroyed/severely-damaged ratios). Both are explicitly documented as
+**engineering categories, not a validated emergency-management scale** —
+the same honesty this codebase already applies to `RiskLevel`
+(Milestone 6B) and `DamagePriority` (Milestone 5).
+
+### Safety controls
+
+Every `IncidentBriefing.disclaimer` is a fixed string, always set
+server-side (`app/incident/briefing_builder.py`), never LLM-generated:
+AI output is advisory; damage predictions may be wrong; road risk is
+modeled, not verified; road accessibility may be unverified; real
+emergency decisions require authoritative information. On the
+`"fallback"` path, `limitations` always includes a fixed minimum set
+(`_STANDARD_LIMITATIONS`, `app/incident/fallback.py`). On the
+`"provider"` path, `limitations` is whatever the provider returned — the
+prompt instructs it to include the same minimum set, but this is not
+currently structurally enforced (see "Limitations" in the final report
+for this milestone). The disclaimer itself, however, is always present
+either way, since it is never sourced from the narrative at all.
+
+### API
+
+`GET`/`POST /api/v1/analysis/{analysis_id}/summary` — see the endpoint
+reference above. Both delegate entirely to
+`IncidentIntelligenceService.get_summary()`; no business logic in the
+route (`app/api/v1/endpoints/analysis.py`). `POST` exists only to accept
+an optional `route` body — never introduced as an unnecessary second
+endpoint for identical behavior.
+
+### Tests
+
+`tests/test_incident.py` — deterministic, no network, no API key, no
+GPU: context construction (full data, empty damage, missing route,
+missing road-risk), the `LLMProvider` interface, every `MockLLMProvider`
+behavior (valid/malformed/timeout/error/unsupported-claim),
+`parse_llm_output()` on valid/malformed/fenced JSON,
+`IncidentIntelligenceService`'s fallback behavior on every failure mode,
+the deterministic fallback (including a regression test that its own
+output survives its own grounding filter), the grounding filter's
+banned-claim and allowed-vocabulary cases, confidence-level thresholds,
+the summary API (200/404/422, GET and POST), Pydantic schema validation,
+and a small deterministic evaluation fixture (below).
+
+### Future evaluation methodology (not implemented)
+
+Documented, not measured, this milestone: factual consistency (does the
+narrative's text match `IncidentContext`'s numbers exactly, beyond the
+keyword-level grounding filter), unsupported-claim rate at scale (this
+milestone tests specific known cases, not a statistical rate over many
+generations), completeness (did the narrative address every section the
+prompt asked for), latency and token usage (only relevant once a real
+provider is used routinely), and human usefulness (requires actual
+rescue-coordinator evaluation, out of scope for an automated test
+suite). `tests/test_incident.py`'s evaluation fixture is a small,
+deterministic sanity check — asserting a known context produces the
+facts it supports — not a claim that any of the above is measured.
+
+### Do not implement (this milestone)
+
+Hazard prediction, tsunami prediction, flood forecasting, evacuation
+recommendation, autonomous emergency decisions, live emergency alerts, a
+frontend, or 3D visualization.
+
 ## ML architecture (Milestones 3A and 3C)
 
 **No model has been trained. Nothing in this codebase fabricates a
@@ -1931,6 +2221,7 @@ app/
 │   ├── road_network_status_service.py          # Milestone 6A: assembles the roads/status response
 │   ├── road_risk_service.py                     # Milestone 6B: assembles the road-risk response
 │   ├── routing_service.py                        # Milestone 6C: assembles routing/comparison results
+│   ├── incident_intelligence_service.py           # Milestone 7: assembles the incident briefing
 │   └── exceptions.py                              # Domain errors (no FastAPI dependency)
 ├── ml/                          # Damage-intelligence architecture (Milestones 3A + 3C) — see above
 │   ├── schemas.py
@@ -1977,6 +2268,19 @@ app/
 │   ├── result_builder.py                    # PathResult -> RouteResult
 │   ├── metrics.py                             # detour_ratio(), risky/blocked-segment counts
 │   └── geojson.py                               # route_to_feature() (RFC 7946 LineString)
+├── incident/                    # Milestone 7 — see above and app/incident/__init__.py
+│   ├── schemas.py                 # IncidentContext, LLMNarrativeOutput, IncidentBriefing
+│   ├── config.py                    # IncidentConfig, sourced from Settings' INCIDENT_* fields
+│   ├── context_builder.py             # build_incident_context() — damage/road-risk/route -> IncidentContext
+│   ├── severity.py                      # classify_incident_severity(), classify_confidence()
+│   ├── prompt.py                          # PROMPT_VERSION, SYSTEM_PROMPT, build_user_message()
+│   ├── provider.py                          # LLMProvider protocol, LLMProviderError/LLMTimeoutError
+│   ├── fallback.py                            # build_fallback_narrative(), DeterministicSummaryProvider
+│   ├── mock_provider.py                         # MockLLMProvider (test-only)
+│   ├── anthropic_provider.py                      # AnthropicLLMProvider (the one real provider)
+│   ├── validator.py                                 # parse_llm_output() — Pydantic-validated JSON parsing
+│   ├── grounding.py                                   # filter_unsupported_claims()
+│   └── briefing_builder.py                              # assemble_briefing()
 ├── schemas/                    # Pydantic request/response models
 ├── utils/                      # Generic helpers with no business meaning (datetime, sanitize)
 └── middleware/                  # CORS policy, request logging

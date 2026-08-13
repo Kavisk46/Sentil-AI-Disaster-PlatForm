@@ -23,7 +23,9 @@ from app.incident.schemas import (
 )
 
 
-def classify_incident_severity(context: IncidentContext, config: IncidentConfig) -> IncidentSeverity:
+def classify_incident_severity(
+    context: IncidentContext, config: IncidentConfig
+) -> IncidentSeverity:
     """`unknown` if damage data isn't available at all — never guessed.
     Otherwise, ordinal thresholds on `destroyed`/`severely_damaged` as a
     fraction of `total_buildings`:

@@ -85,7 +85,9 @@ def _spatial_bounds(buildings: list[BuildingDamage]) -> BoundingBoxGeometry | No
     return BoundingBoxGeometry(coordinates=(min(lons), min(lats), max(lons), max(lats)))
 
 
-def _build_road_risk_context(road_risk: RoadRiskResponse, config: IncidentConfig) -> RoadRiskContext:
+def _build_road_risk_context(
+    road_risk: RoadRiskResponse, config: IncidentConfig
+) -> RoadRiskContext:
     if not road_risk.available:
         return RoadRiskContext(available=False, reason=road_risk.reason)
 

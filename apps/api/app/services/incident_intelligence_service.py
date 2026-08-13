@@ -49,7 +49,9 @@ class IncidentIntelligenceService:
         self._llm_provider = llm_provider
         self._config = config
 
-    def get_summary(self, analysis_id: UUID, route_query: RouteQuery | None = None) -> IncidentBriefing:
+    def get_summary(
+        self, analysis_id: UUID, route_query: RouteQuery | None = None
+    ) -> IncidentBriefing:
         """Raises `AnalysisNotFoundError` (-> `404`) if `analysis_id` is
         unknown — the same contract as `RoadRiskService.get_road_risk`."""
         context = self._build_context(analysis_id, route_query)

@@ -8,34 +8,42 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.1.1",
+    "@sentinelai/shared": "*",
+    "@tanstack/react-query": "^5.62.7",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.469.0",
+    "maplibre-gl": "^6.3.0",
     "next": "^15.5.20",
+    "next-themes": "^0.4.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "@sentinelai/shared": "*",
-    "@radix-ui/react-slot": "^1.1.1",
-    "@tanstack/react-query": "^5.62.7",
-    "zustand": "^5.0.2",
-    "next-themes": "^0.4.4",
-    "clsx": "^2.1.1",
     "tailwind-merge": "^2.6.0",
-    "class-variance-authority": "^0.7.1",
-    "lucide-react": "^0.469.0"
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
     "@sentinelai/config": "*",
-    "@tanstack/react-query-devtools": "^5.62.7",
     "@tailwindcss/postcss": "^4",
+    "@tanstack/react-query-devtools": "^5.62.7",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.4",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.0.5",
     "eslint": "^9",
     "eslint-config-next": "^15.5.20",
+    "jsdom": "^28.1.0",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.1.1",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.10"
   }
 }

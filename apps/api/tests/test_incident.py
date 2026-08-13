@@ -17,6 +17,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
+from pydantic import ValidationError
 
 from app.api.deps import get_llm_provider
 from app.core.config import Settings
@@ -27,14 +28,20 @@ from app.incident.fallback import DeterministicSummaryProvider, build_fallback_n
 from app.incident.grounding import filter_unsupported_claims
 from app.incident.mock_provider import MockLLMProvider
 from app.incident.provider import LLMProviderError, LLMTimeoutError
-from app.incident.schemas import IncidentSeverity, LLMNarrativeOutput
+from app.incident.schemas import (
+    AffectedStructuresSummary,
+    ConfidenceLevel,
+    IncidentBriefing,
+    IncidentSeverity,
+    LLMNarrativeOutput,
+)
 from app.incident.severity import classify_confidence, classify_incident_severity
 from app.incident.validator import parse_llm_output
 from app.ml.geospatial.crs import CoordinateReferenceSystem
 from app.ml.geospatial.geometry import PointGeometry
-from app.ml.schemas import BuildingDamage, DamageAnalysis, DamageClass, DamageSummary, ModelStatus
 from app.ml.model import RawDetection
-from app.roads.schemas import AccessibilityStatus, RiskLevel, RiskSource
+from app.ml.schemas import BuildingDamage, DamageAnalysis, DamageClass, DamageSummary, ModelStatus
+from app.roads.schemas import AccessibilityStatus, RiskLevel, RiskSource, RoadEdge
 from app.routing.schemas import RouteComparison, RouteResult, RoutingMode
 from app.schemas.analysis import AnalysisStatus
 from app.schemas.road_risk import RoadRiskResponse
@@ -59,7 +66,9 @@ def _building(
     lat: float | None = None,
 ) -> BuildingDamage:
     if lon is None or lat is None:
-        return BuildingDamage(building_id=building_id, damage_class=damage_class, confidence=confidence)
+        return BuildingDamage(
+            building_id=building_id, damage_class=damage_class, confidence=confidence
+        )
     return BuildingDamage(
         building_id=building_id,
         damage_class=damage_class,
@@ -99,41 +108,70 @@ def _road_edge(
     *, risk_level: RiskLevel, accessibility: AccessibilityStatus, risk_sources: list[RiskSource]
 ) -> RoadEdge:
     return RoadEdge(
-        source_node="n1", target_node="n2", distance=100.0, base_cost=100.0,
-        accessibility=accessibility, risk_score=1.0, risk_level=risk_level, risk_sources=risk_sources,
+        source_node="n1",
+        target_node="n2",
+        distance=100.0,
+        base_cost=100.0,
+        accessibility=accessibility,
+        risk_score=1.0,
+        risk_level=risk_level,
+        risk_sources=risk_sources,
     )
 
 
 def _available_road_risk(analysis_id: object) -> RoadRiskResponse:
     risk_source = RiskSource(
-        building_id="b0", damage_class=DamageClass.DESTROYED, confidence=0.9,
-        distance_meters=10.0, contribution=0.9,
+        building_id="b0",
+        damage_class=DamageClass.DESTROYED,
+        confidence=0.9,
+        distance_meters=10.0,
+        contribution=0.9,
     )
     edges = [
-        _road_edge(risk_level=RiskLevel.CRITICAL, accessibility=AccessibilityStatus.BLOCKED, risk_sources=[risk_source]),
-        _road_edge(risk_level=RiskLevel.HIGH, accessibility=AccessibilityStatus.RESTRICTED, risk_sources=[risk_source]),
-        _road_edge(risk_level=RiskLevel.LOW, accessibility=AccessibilityStatus.OPEN, risk_sources=[]),
+        _road_edge(
+            risk_level=RiskLevel.CRITICAL,
+            accessibility=AccessibilityStatus.BLOCKED,
+            risk_sources=[risk_source],
+        ),
+        _road_edge(
+            risk_level=RiskLevel.HIGH,
+            accessibility=AccessibilityStatus.RESTRICTED,
+            risk_sources=[risk_source],
+        ),
+        _road_edge(
+            risk_level=RiskLevel.LOW, accessibility=AccessibilityStatus.OPEN, risk_sources=[]
+        ),
     ]
     return RoadRiskResponse(
         analysis_id=analysis_id, status=AnalysisStatus.COMPLETED, available=True, edges=edges
     )
 
 
-def _unavailable_road_risk(analysis_id: object, reason: str = "No road network is loaded.") -> RoadRiskResponse:
+def _unavailable_road_risk(
+    analysis_id: object, reason: str = "No road network is loaded."
+) -> RoadRiskResponse:
     return RoadRiskResponse(
-        analysis_id=analysis_id, status=AnalysisStatus.COMPLETED, available=False, reason=reason, edges=[]
+        analysis_id=analysis_id,
+        status=AnalysisStatus.COMPLETED,
+        available=False,
+        reason=reason,
+        edges=[],
     )
 
 
 def _route_comparison(*, found: bool = True) -> RouteComparison:
     distance_only = RouteResult(
-        routing_mode=RoutingMode.DISTANCE_ONLY, found=found,
-        total_distance=1000.0 if found else None, accumulated_risk=5.0 if found else None,
+        routing_mode=RoutingMode.DISTANCE_ONLY,
+        found=found,
+        total_distance=1000.0 if found else None,
+        accumulated_risk=5.0 if found else None,
     )
     risk_aware = RouteResult(
-        routing_mode=RoutingMode.RISK_AWARE, found=found,
-        total_distance=1200.0 if found else None, accumulated_risk=1.0 if found else None,
-        reason=None if found else "No path exists between the start and destination nodes in the current road graph.",
+        routing_mode=RoutingMode.RISK_AWARE,
+        found=found,
+        total_distance=1200.0 if found else None,
+        accumulated_risk=1.0 if found else None,
+        reason=None if found else "No path exists between the start and destination nodes.",
     )
     return RouteComparison(
         distance_only=distance_only,
@@ -143,15 +181,6 @@ def _route_comparison(*, found: bool = True) -> RouteComparison:
         routes_differ=found,
         detour_ratio=1.2 if found else None,
         high_risk_edges_avoided=["n1->n2"] if found else [],
-    )
-
-
-def RoadEdgeFactory(*, risk_level: RiskLevel, accessibility: AccessibilityStatus, risk_sources: list[RiskSource]):
-    from app.roads.schemas import RoadEdge
-
-    return RoadEdge(
-        source_node="n1", target_node="n2", distance=100.0, base_cost=100.0,
-        accessibility=accessibility, risk_score=1.0, risk_level=risk_level, risk_sources=risk_sources,
     )
 
 
@@ -212,11 +241,10 @@ def test_damage_context_unavailable_when_analysis_not_completed() -> None:
 
 def test_damage_context_unavailable_for_completed_analysis_with_zero_buildings() -> None:
     analysis = _completed_analysis([])
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
-    assert classify_incident_severity(
-        build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, _config()),
-        _config(),
-    ) is IncidentSeverity.LOW
+    assert classify_incident_severity(context, _config()) is IncidentSeverity.LOW
 
 
 # ---------------------------------------------------------------------------
@@ -226,8 +254,9 @@ def test_damage_context_unavailable_for_completed_analysis_with_zero_buildings()
 
 def test_route_context_unavailable_when_no_route_requested() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
 
-    context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, _config())
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     assert context.route.available is False
     assert context.route.reason == "No route was requested for this summary."
@@ -236,9 +265,10 @@ def test_route_context_unavailable_when_no_route_requested() -> None:
 
 def test_route_context_unavailable_when_route_not_found() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
     comparison = _route_comparison(found=False)
 
-    context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), comparison, _config())
+    context = build_incident_context(analysis, road_risk, comparison, _config())
 
     assert context.route.available is False
     assert context.route.reason is not None
@@ -251,12 +281,13 @@ def test_route_context_unavailable_when_route_not_found() -> None:
 
 def test_road_risk_context_unavailable_carries_the_service_reason() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    road_risk = _unavailable_road_risk(analysis.analysis_id, reason="No road network is loaded (see GET /api/v1/roads/status).")
+    reason = "No road network is loaded (see GET /api/v1/roads/status)."
+    road_risk = _unavailable_road_risk(analysis.analysis_id, reason=reason)
 
     context = build_incident_context(analysis, road_risk, None, _config())
 
     assert context.road_risk.available is False
-    assert context.road_risk.reason == "No road network is loaded (see GET /api/v1/roads/status)."
+    assert context.road_risk.reason == reason
     assert context.road_risk.total_edges_assessed == 0
     assert context.road_risk.highest_risk_level is None
 
@@ -271,7 +302,8 @@ def test_every_provider_implements_generate_incident_summary() -> None:
     `LLMProvider` without inheriting from it, the same duck-typed pattern
     `DamageModel`/`BuildingLocalizer`/`RoadNetworkSource` already use."""
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, _config())
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     for provider in (DeterministicSummaryProvider(), MockLLMProvider("valid")):
         raw = provider.generate_incident_summary(context)
@@ -284,8 +316,13 @@ def test_every_provider_implements_generate_incident_summary() -> None:
 
 
 def test_mock_provider_valid_behavior_reflects_the_context() -> None:
-    analysis = _completed_analysis([_building("b0", DamageClass.DESTROYED, 0.9), _building("b1", DamageClass.MAJOR, 0.9)])
-    context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, _config())
+    buildings = [
+        _building("b0", DamageClass.DESTROYED, 0.9),
+        _building("b1", DamageClass.MAJOR, 0.9),
+    ]
+    analysis = _completed_analysis(buildings)
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     raw = MockLLMProvider("valid").generate_incident_summary(context)
 
@@ -305,21 +342,27 @@ def test_mock_provider_malformed_behavior_returns_unparseable_text() -> None:
 
 
 def test_mock_provider_timeout_behavior_raises() -> None:
-    context = build_incident_context(_completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config())
+    context = build_incident_context(
+        _completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config()
+    )
 
     with pytest.raises(LLMTimeoutError):
         MockLLMProvider("timeout").generate_incident_summary(context)
 
 
 def test_mock_provider_error_behavior_raises() -> None:
-    context = build_incident_context(_completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config())
+    context = build_incident_context(
+        _completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config()
+    )
 
     with pytest.raises(LLMProviderError):
         MockLLMProvider("error").generate_incident_summary(context)
 
 
 def test_mock_provider_unsupported_claim_behavior_is_rejected_by_grounding() -> None:
-    context = build_incident_context(_completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config())
+    context = build_incident_context(
+        _completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config()
+    )
 
     raw = MockLLMProvider("unsupported_claim").generate_incident_summary(context)
     narrative = parse_llm_output(raw)
@@ -389,11 +432,15 @@ class _StubRoadRiskService:
 
 
 class _StubRoutingService:
-    def compare_routes(self, analysis_id: object, start: object, destination: object) -> RouteComparison:
+    def compare_routes(
+        self, analysis_id: object, start: object, destination: object
+    ) -> RouteComparison:
         raise AssertionError("should not be called when no route_query is given")
 
 
-def _service(provider: object, analysis: DamageAnalysis, road_risk: RoadRiskResponse) -> IncidentIntelligenceService:
+def _service(
+    provider: object, analysis: DamageAnalysis, road_risk: RoadRiskResponse
+) -> IncidentIntelligenceService:
     return IncidentIntelligenceService(
         processing_service=_StubProcessingService(analysis),  # type: ignore[arg-type]
         road_risk_service=_StubRoadRiskService(road_risk),  # type: ignore[arg-type]
@@ -405,7 +452,8 @@ def _service(provider: object, analysis: DamageAnalysis, road_risk: RoadRiskResp
 
 def test_service_falls_back_to_deterministic_narrative_on_timeout() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    service = _service(MockLLMProvider("timeout"), analysis, _unavailable_road_risk(analysis.analysis_id))
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    service = _service(MockLLMProvider("timeout"), analysis, road_risk)
 
     briefing = service.get_summary(analysis.analysis_id)
 
@@ -414,7 +462,8 @@ def test_service_falls_back_to_deterministic_narrative_on_timeout() -> None:
 
 def test_service_falls_back_to_deterministic_narrative_on_provider_error() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    service = _service(MockLLMProvider("error"), analysis, _unavailable_road_risk(analysis.analysis_id))
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    service = _service(MockLLMProvider("error"), analysis, road_risk)
 
     briefing = service.get_summary(analysis.analysis_id)
 
@@ -423,7 +472,8 @@ def test_service_falls_back_to_deterministic_narrative_on_provider_error() -> No
 
 def test_service_falls_back_on_malformed_output() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    service = _service(MockLLMProvider("malformed"), analysis, _unavailable_road_risk(analysis.analysis_id))
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    service = _service(MockLLMProvider("malformed"), analysis, road_risk)
 
     briefing = service.get_summary(analysis.analysis_id)
 
@@ -432,7 +482,8 @@ def test_service_falls_back_on_malformed_output() -> None:
 
 def test_service_falls_back_on_unsupported_claim() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.MINOR)])
-    service = _service(MockLLMProvider("unsupported_claim"), analysis, _unavailable_road_risk(analysis.analysis_id))
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    service = _service(MockLLMProvider("unsupported_claim"), analysis, road_risk)
 
     briefing = service.get_summary(analysis.analysis_id)
 
@@ -442,7 +493,8 @@ def test_service_falls_back_on_unsupported_claim() -> None:
 
 def test_service_uses_provider_output_when_valid() -> None:
     analysis = _completed_analysis([_building("b0", DamageClass.DESTROYED, 0.9)])
-    service = _service(MockLLMProvider("valid"), analysis, _unavailable_road_risk(analysis.analysis_id))
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    service = _service(MockLLMProvider("valid"), analysis, road_risk)
 
     briefing = service.get_summary(analysis.analysis_id)
 
@@ -455,10 +507,10 @@ def test_service_uses_provider_output_when_valid() -> None:
 
 
 def test_deterministic_fallback_states_only_whats_in_the_context() -> None:
-    analysis = _completed_analysis(
-        [_building("b0", DamageClass.DESTROYED, 0.9, lon=10.0, lat=20.0)]
-    )
-    context = build_incident_context(analysis, _available_road_risk(analysis.analysis_id), None, _config())
+    buildings = [_building("b0", DamageClass.DESTROYED, 0.9, lon=10.0, lat=20.0)]
+    analysis = _completed_analysis(buildings)
+    road_risk = _available_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     narrative = build_fallback_narrative(context)
 
@@ -470,7 +522,8 @@ def test_deterministic_fallback_states_only_whats_in_the_context() -> None:
 
 def test_deterministic_fallback_reports_unavailable_when_nothing_is_available() -> None:
     analysis = _uncompleted_analysis()
-    context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, _config())
+    road_risk = _unavailable_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     narrative = build_fallback_narrative(context)
 
@@ -485,10 +538,10 @@ def test_deterministic_provider_output_survives_its_own_grounding_filter() -> No
     further fallback to catch it. In particular, spatial-bounds
     coordinates must not be formatted with enough precision to look like
     an invented lat/lon to the coordinate-like-pattern check."""
-    analysis = _completed_analysis(
-        [_building("b0", DamageClass.DESTROYED, 0.9, lon=10.123456, lat=20.654321)]
-    )
-    context = build_incident_context(analysis, _available_road_risk(analysis.analysis_id), None, _config())
+    buildings = [_building("b0", DamageClass.DESTROYED, 0.9, lon=10.123456, lat=20.654321)]
+    analysis = _completed_analysis(buildings)
+    road_risk = _available_road_risk(analysis.analysis_id)
+    context = build_incident_context(analysis, road_risk, None, _config())
 
     raw = DeterministicSummaryProvider().generate_incident_summary(context)
     narrative = parse_llm_output(raw)
@@ -517,7 +570,9 @@ def test_deterministic_provider_output_survives_its_own_grounding_filter() -> No
 )
 def test_filter_rejects_unsupported_claims(field_value: str) -> None:
     narrative = LLMNarrativeOutput(priority_area=field_value, route_summary="ok")
-    context = build_incident_context(_completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config())
+    context = build_incident_context(
+        _completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config()
+    )
 
     assert filter_unsupported_claims(narrative, context) is None
 
@@ -528,7 +583,9 @@ def test_filter_allows_the_systems_own_grounded_vocabulary() -> None:
         route_summary="The selected route avoids a blocked and a restricted segment.",
         key_findings=["1 road segment is blocked.", "1 road segment is restricted."],
     )
-    context = build_incident_context(_completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config())
+    context = build_incident_context(
+        _completed_analysis([]), _unavailable_road_risk(uuid4()), None, _config()
+    )
 
     assert filter_unsupported_claims(narrative, context) is narrative
 
@@ -539,24 +596,21 @@ def test_filter_allows_the_systems_own_grounded_vocabulary() -> None:
 
 
 def test_confidence_unknown_when_damage_unavailable() -> None:
-    context = build_incident_context(_uncompleted_analysis(), _unavailable_road_risk(uuid4()), None, _config())
-
-    assert classify_confidence(context, _config()) is context.damage.average_confidence or True
-    from app.incident.schemas import ConfidenceLevel
+    road_risk = _unavailable_road_risk(uuid4())
+    context = build_incident_context(_uncompleted_analysis(), road_risk, None, _config())
 
     assert classify_confidence(context, _config()) is ConfidenceLevel.UNKNOWN
 
 
 def test_confidence_high_moderate_low_thresholds() -> None:
-    from app.incident.schemas import ConfidenceLevel
-
     config = _config()
     high = _completed_analysis([_building("b0", DamageClass.MINOR, 0.95)])
     moderate = _completed_analysis([_building("b0", DamageClass.MINOR, 0.6)])
     low = _completed_analysis([_building("b0", DamageClass.MINOR, 0.1)])
 
-    def confidence_for(analysis: DamageAnalysis) -> "ConfidenceLevel":
-        context = build_incident_context(analysis, _unavailable_road_risk(analysis.analysis_id), None, config)
+    def confidence_for(analysis: DamageAnalysis) -> ConfidenceLevel:
+        road_risk = _unavailable_road_risk(analysis.analysis_id)
+        context = build_incident_context(analysis, road_risk, None, config)
         return classify_confidence(context, config)
 
     assert confidence_for(high) is ConfidenceLevel.HIGH
@@ -638,7 +692,12 @@ def test_post_summary_with_a_route_body_is_accepted(
 
     response = client.post(
         f"/api/v1/analysis/{analysis_id}/summary",
-        json={"route": {"start": {"latitude": 1.0, "longitude": 1.0}, "destination": {"latitude": 2.0, "longitude": 2.0}}},
+        json={
+            "route": {
+                "start": {"latitude": 1.0, "longitude": 1.0},
+                "destination": {"latitude": 2.0, "longitude": 2.0},
+            }
+        },
     )
 
     assert response.status_code == 200
@@ -680,27 +739,29 @@ def test_get_llm_provider_falls_back_to_deterministic_without_an_api_key() -> No
 
 
 def test_llm_narrative_output_rejects_missing_required_fields() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         LLMNarrativeOutput.model_validate({"priority_area": "x"})
 
 
 def test_affected_structures_summary_rejects_negative_counts() -> None:
-    from app.incident.schemas import AffectedStructuresSummary
-
-    with pytest.raises(Exception):
-        AffectedStructuresSummary(total=-1, damaged=0, severely_damaged=0, destroyed=0, high_priority_count=0)
+    with pytest.raises(ValidationError):
+        AffectedStructuresSummary(
+            total=-1, damaged=0, severely_damaged=0, destroyed=0, high_priority_count=0
+        )
 
 
 def test_incident_briefing_source_is_restricted_to_the_literal_values() -> None:
-    from app.incident.schemas import IncidentBriefing
-
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         IncidentBriefing.model_validate(
             {
                 "analysis_id": str(uuid4()),
                 "incident_severity": "low",
                 "affected_structures": {
-                    "total": 0, "damaged": 0, "severely_damaged": 0, "destroyed": 0, "high_priority_count": 0
+                    "total": 0,
+                    "damaged": 0,
+                    "severely_damaged": 0,
+                    "destroyed": 0,
+                    "high_priority_count": 0,
                 },
                 "priority_area": "x",
                 "route_summary": "x",
@@ -714,7 +775,7 @@ def test_incident_briefing_source_is_restricted_to_the_literal_values() -> None:
 
 
 def test_incident_config_rejects_inverted_severity_thresholds() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="severity_severe_ratio_moderate"):
         IncidentConfig(
             max_listed_structure_ids=10,
             severity_destroyed_ratio_critical=0.25,
@@ -755,7 +816,8 @@ def test_evaluation_fixture_known_context_produces_expected_facts() -> None:
     assert briefing_schema["affected_structures"]["destroyed"] == 2
     assert briefing_schema["affected_structures"]["high_priority_count"] == 3
     assert briefing_schema["incident_severity"] == IncidentSeverity.CRITICAL.value
-    assert "destroyed" in briefing.priority_area or "2 destroyed" in " ".join(briefing.key_findings)
+    findings_text = " ".join(briefing.key_findings)
+    assert "destroyed" in briefing.priority_area or "2 destroyed" in findings_text
 
     # Exact schema shape for the mock-provider path too.
     mock_raw = MockLLMProvider("valid").generate_incident_summary(context)
@@ -763,7 +825,16 @@ def test_evaluation_fixture_known_context_produces_expected_facts() -> None:
     assert mock_narrative is not None
     mock_briefing = assemble_briefing(context, mock_narrative, "provider", config)
     assert set(mock_briefing.model_dump().keys()) == {
-        "analysis_id", "incident_severity", "affected_structures", "priority_area",
-        "route_summary", "key_findings", "limitations", "confidence", "generated_at",
-        "source", "prompt_version", "disclaimer",
+        "analysis_id",
+        "incident_severity",
+        "affected_structures",
+        "priority_area",
+        "route_summary",
+        "key_findings",
+        "limitations",
+        "confidence",
+        "generated_at",
+        "source",
+        "prompt_version",
+        "disclaimer",
     }

@@ -80,8 +80,8 @@ def _key_findings(context: IncidentContext) -> list[str]:
     if damage.available and damage.summary is not None:
         summary = damage.summary
         findings.append(
-            f"{summary.total_buildings} structure(s) assessed: {summary.damaged_buildings} damaged, "
-            f"{summary.destroyed} destroyed."
+            f"{summary.total_buildings} structure(s) assessed: "
+            f"{summary.damaged_buildings} damaged, {summary.destroyed} destroyed."
         )
         if damage.average_confidence is not None:
             findings.append(f"Average detection confidence: {damage.average_confidence:.2f}.")

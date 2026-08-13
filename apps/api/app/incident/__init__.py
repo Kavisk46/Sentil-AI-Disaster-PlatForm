@@ -1,6 +1,7 @@
 """AI incident intelligence (Milestone 7).
 
-    API -> IncidentIntelligenceService -> Context Builder -> LLM Provider -> Schema Validation -> Incident Briefing
+    API -> IncidentIntelligenceService -> Context Builder -> LLM Provider
+        -> Schema Validation -> Incident Briefing
 
 Converts SentinelAI's structured, deterministic analysis results (damage
 predictions — Milestone 3/5, road risk — Milestone 6B, routing — Milestone

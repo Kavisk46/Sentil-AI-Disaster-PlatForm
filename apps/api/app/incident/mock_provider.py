@@ -72,7 +72,9 @@ def _narrative_from_context(context: IncidentContext) -> LLMNarrativeOutput:
 
     findings = []
     if context.road_risk.available:
-        findings.append(f"{context.road_risk.risky_edge_count} road segment(s) at high/critical risk.")
+        findings.append(
+            f"{context.road_risk.risky_edge_count} road segment(s) at high/critical risk."
+        )
     limitations = [
         "Damage predictions may be inaccurate.",
         "Road risk is a modeled estimate, not a verified fact.",

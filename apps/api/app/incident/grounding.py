@@ -66,7 +66,12 @@ def filter_unsupported_claims(
 
 
 def _text_fields(narrative: LLMNarrativeOutput) -> list[str]:
-    return [narrative.priority_area, narrative.route_summary, *narrative.key_findings, *narrative.limitations]
+    return [
+        narrative.priority_area,
+        narrative.route_summary,
+        *narrative.key_findings,
+        *narrative.limitations,
+    ]
 
 
 def _contains_banned_claim(text: str) -> bool:

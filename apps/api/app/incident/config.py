@@ -29,7 +29,8 @@ class IncidentConfig:
     def __post_init__(self) -> None:
         if self.max_listed_structure_ids < 0:
             raise ValueError(
-                f"max_listed_structure_ids must be non-negative; got {self.max_listed_structure_ids!r}."
+                "max_listed_structure_ids must be non-negative; got "
+                f"{self.max_listed_structure_ids!r}."
             )
         severity_ordered = self.severity_severe_ratio_moderate <= self.severity_severe_ratio_high
         if not severity_ordered:

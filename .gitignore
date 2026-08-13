@@ -14,7 +14,10 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# NOTE: deliberately no bare `lib/` here — Python's build output lives under
+# `build/` (already ignored above); an unscoped `lib/` rule would also
+# match e.g. `apps/web/src/lib/`, silently excluding real frontend source
+# from version control.
 lib64/
 parts/
 sdist/

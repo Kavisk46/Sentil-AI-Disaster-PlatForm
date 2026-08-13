@@ -88,7 +88,10 @@ class DamageContext(BaseModel):
     reason: str | None = None
     summary: DamageSummary | None = None
     average_confidence: float | None = Field(
-        default=None, ge=0.0, le=1.0, description="Mean BuildingDamage.confidence across all buildings."
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Mean BuildingDamage.confidence across all buildings.",
     )
     high_priority_structure_ids: list[str] = Field(default_factory=list)
     spatial_bounds: BoundingBoxGeometry | None = Field(
