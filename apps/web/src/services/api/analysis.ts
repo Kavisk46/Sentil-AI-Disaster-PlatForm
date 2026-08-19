@@ -9,10 +9,13 @@ import { apiGet, apiUpload } from "@/lib/api-client";
  * component (see `docs/architecture/frontend.md`, "API integration").
  */
 
-export function uploadAnalysis(file: File): Promise<ApiResult<AnalysisCreateResponse>> {
+export function uploadAnalysis(
+  file: File,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<ApiResult<AnalysisCreateResponse>> {
   const formData = new FormData();
   formData.append("image", file);
-  return apiUpload<AnalysisCreateResponse>("/api/v1/analysis", formData);
+  return apiUpload<AnalysisCreateResponse>("/api/v1/analysis", formData, onProgress);
 }
 
 export function getAnalysis(analysisId: string): Promise<ApiResult<DamageAnalysis>> {

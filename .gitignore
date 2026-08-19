@@ -261,6 +261,19 @@ docker/**/*.local.yml
 apps/api/storage/
 
 # ------------------------------------------------------------------
+# Research evaluation (Milestone 10) — generated output only. Never a
+# committed dataset or model weight; see research/results/README.md.
+# ------------------------------------------------------------------
+research/results/raw/*
+!research/results/raw/.gitkeep
+research/results/processed/*
+!research/results/processed/.gitkeep
+research/results/figures/*
+!research/results/figures/.gitkeep
+research/reports/*
+!research/reports/.gitkeep
+
+# ------------------------------------------------------------------
 # Editors / OS
 # ------------------------------------------------------------------
 .DS_Store

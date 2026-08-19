@@ -1,0 +1,5 @@
+{
+  "name": "ablation_c_road_risk_only",
+  "description": "Ablation C: road risk only. Identical to risk_aware.",
+  "ablation": { "use_damage": false, "use_road_risk": true, "use_hazard": false }
+}

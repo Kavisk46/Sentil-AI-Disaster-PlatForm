@@ -25,6 +25,13 @@ const DEFAULT_STYLE_URL =
 
 const EMPTY_FEATURE_COLLECTION = { type: "FeatureCollection" as const, features: [] };
 
+export interface CommandMapInitialView {
+  center: [number, number];
+  zoom: number;
+  pitch?: number;
+  bearing?: number;
+}
+
 export interface CommandMapProps {
   damage: DamageFeatureCollection | null;
   distanceOnlyRoute: RouteResult | null;
@@ -34,6 +41,33 @@ export interface CommandMapProps {
   /** Fires when the user clicks the map, for picking route start/destination. */
   onMapClick?: (point: GeographicCoordinate) => void;
   className?: string;
+  /**
+   * Starting camera position. Defaults to `[0, 0]`/zoom 1.5/pitch 45°
+   * (the dashboard's existing behavior, unchanged) — only the landing
+   * hero passes a specific view.
+   */
+  initialView?: CommandMapInitialView;
+  /**
+   * When `false`, disables every built-in mouse/touch/keyboard handler
+   * (drag, scroll-zoom, etc.) via MapLibre's own `interactive` map option,
+   * skips `NavigationControl`/`ScaleControl`, and never wires
+   * `onMapClick`. Used by the decorative landing hero, which is not meant
+   * to be operated. Default `true` (today's dashboard behavior).
+   */
+  interactive?: boolean;
+  /**
+   * Slow, continuous bearing drift for a decorative hero shot — skipped
+   * entirely under `prefers-reduced-motion`, same convention as the
+   * existing pitch/fitBounds motion checks below. Default `false`.
+   */
+  autoRotate?: boolean;
+  /**
+   * Marks the map as pure decoration for assistive tech (`aria-hidden`)
+   * and skips the `aria-live` feature-count summary, which would be
+   * meaningless on a marketing page with no real analysis loaded. Default
+   * `false` (today's dashboard behavior, which needs the real summary).
+   */
+  decorative?: boolean;
 }
 
 const SOURCE_IDS = {
@@ -86,11 +120,20 @@ export function CommandMap({
   routeDestination,
   onMapClick,
   className,
+  initialView,
+  interactive = true,
+  autoRotate = false,
+  decorative = false,
 }: CommandMapProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const mapRef = React.useRef<maplibregl.Map | null>(null);
   const onMapClickRef = React.useRef(onMapClick);
   onMapClickRef.current = onMapClick;
+  // Read once at mount, like `onMapClickRef` — a given `CommandMap` usage
+  // (dashboard vs. landing hero) doesn't change these mid-life.
+  const initialViewRef = React.useRef(initialView);
+  const interactiveRef = React.useRef(interactive);
+  const autoRotateRef = React.useRef(autoRotate);
   const [isReady, setIsReady] = React.useState(false);
 
   // Mount: create the map exactly once. Deliberately not re-created on
@@ -102,32 +145,46 @@ export function CommandMap({
 
     let cancelled = false;
     let map: maplibregl.Map | null = null;
+    let rotateFrameId: number | null = null;
 
     void import("maplibre-gl").then((maplibregl) => {
       if (cancelled || !containerRef.current) return;
 
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const view = initialViewRef.current;
+      const isInteractive = interactiveRef.current;
 
       map = new maplibregl.Map({
         container: containerRef.current,
         style: DEFAULT_STYLE_URL,
-        center: [0, 0],
-        zoom: 1.5,
-        pitch: prefersReducedMotion ? 0 : 45,
+        center: view?.center ?? [0, 0],
+        zoom: view?.zoom ?? 1.5,
+        pitch: prefersReducedMotion ? 0 : (view?.pitch ?? 45),
         maxPitch: 70,
-        bearing: 0,
+        bearing: view?.bearing ?? 0,
         attributionControl: { compact: true },
+        interactive: isInteractive,
       });
 
-      map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-      map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
+      if (isInteractive) {
+        map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+        map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
 
-      map.on("click", (event) => {
-        onMapClickRef.current?.({
-          latitude: event.lngLat.lat,
-          longitude: event.lngLat.lng,
+        map.on("click", (event) => {
+          onMapClickRef.current?.({
+            latitude: event.lngLat.lat,
+            longitude: event.lngLat.lng,
+          });
         });
-      });
+      }
+
+      if (autoRotateRef.current && !prefersReducedMotion) {
+        const spin = () => {
+          map?.setBearing((map.getBearing() + 0.02) % 360);
+          rotateFrameId = requestAnimationFrame(spin);
+        };
+        rotateFrameId = requestAnimationFrame(spin);
+      }
 
       map.on("load", () => {
         if (cancelled) return;
@@ -271,6 +328,7 @@ export function CommandMap({
 
     return () => {
       cancelled = true;
+      if (rotateFrameId !== null) cancelAnimationFrame(rotateFrameId);
       map?.remove();
       mapRef.current = null;
       setIsReady(false);
@@ -359,25 +417,32 @@ export function CommandMap({
   }, [damage, distanceOnlyRoute, riskAwareRoute, isReady]);
 
   return (
-    <div className={className}>
+    <div className={className} aria-hidden={decorative || undefined}>
       <div
         ref={containerRef}
-        role="application"
-        aria-label="Disaster command map: damage locations, road risk, and rescue routes"
+        role={decorative ? undefined : "application"}
+        aria-label={
+          decorative ? undefined : "Disaster command map: damage locations, road risk, and rescue routes"
+        }
         className="size-full"
       />
       {/* MapLibre's WebGL canvas cannot itself be made screen-reader
           navigable — this text summary is the accessible equivalent of
           what the map shows, per the milestone's "screen-reader labels
           for important controls" requirement. See
-          docs/architecture/frontend.md, "Accessibility decisions". */}
-      <p className="sr-only" aria-live="polite">
-        {damage
-          ? `${damage.features.length} damage feature(s) shown.`
-          : "No damage data loaded."}{" "}
-        {riskAwareRoute?.found ? "A risk-aware route is shown." : ""}{" "}
-        {distanceOnlyRoute?.found ? "A distance-only baseline route is shown." : ""}
-      </p>
+          docs/architecture/frontend.md, "Accessibility decisions". Skipped
+          entirely for `decorative` maps (the landing hero) — announcing
+          "No damage data loaded" on a marketing page with no analysis
+          would be meaningless, not accessible. */}
+      {!decorative && (
+        <p className="sr-only" aria-live="polite">
+          {damage
+            ? `${damage.features.length} damage feature(s) shown.`
+            : "No damage data loaded."}{" "}
+          {riskAwareRoute?.found ? "A risk-aware route is shown." : ""}{" "}
+          {distanceOnlyRoute?.found ? "A distance-only baseline route is shown." : ""}
+        </p>
+      )}
     </div>
   );
 }

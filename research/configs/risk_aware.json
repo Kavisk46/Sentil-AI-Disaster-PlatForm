@@ -1,0 +1,5 @@
+{
+  "name": "risk_aware",
+  "description": "Baseline C: edge cost = distance + SentinelAI's real calibrated road-risk penalty (app.risk.formula.compute_risk_adjusted_cost, unmodified from production).",
+  "ablation": { "use_damage": false, "use_road_risk": true, "use_hazard": false }
+}

@@ -54,14 +54,50 @@ export async function apiPost<T>(path: string, body?: unknown): Promise<ApiResul
   }
 }
 
-/** Same contract as `apiGet`/`apiPost`, for multipart file uploads
+/**
+ * Same contract as `apiGet`/`apiPost`, for multipart file uploads
  * (`POST /api/v1/analysis`) — the browser sets the multipart boundary
- * itself, so `Content-Type` is deliberately left unset here. */
-export async function apiUpload<T>(path: string, formData: FormData): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(`${API_BASE_URL}${path}`, { method: "POST", body: formData });
-    return await toApiResult<T>(response);
-  } catch (cause) {
-    return { ok: false, error: cause instanceof Error ? cause.message : "Unknown error" };
-  }
+ * itself, so `Content-Type` is deliberately left unset here.
+ *
+ * Uses `XMLHttpRequest`, not `fetch`, so an optional `onProgress` callback
+ * can report real `xhr.upload.onprogress` byte counts — the only way to
+ * observe genuine upload progress in a browser (the backend itself has no
+ * progress/percentage field; see `POST /api/v1/analysis`). `onProgress` is
+ * never invoked with a guessed or animated number, only what the browser
+ * actually reports. Same `ApiResult<T>` shape and same
+ * backend-`detail`-message-over-status-line preference as `toApiResult`.
+ */
+export function apiUpload<T>(
+  path: string,
+  formData: FormData,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<ApiResult<T>> {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${API_BASE_URL}${path}`);
+    if (onProgress) {
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(event.loaded, event.total);
+      };
+    }
+    xhr.onerror = () => resolve({ ok: false, error: "Network error" });
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        body = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ ok: true, data: body as T });
+        return;
+      }
+      const detail =
+        typeof body === "object" && body !== null && "detail" in body
+          ? String((body as { detail: unknown }).detail)
+          : null;
+      resolve({ ok: false, error: detail ?? `${xhr.status} ${xhr.statusText}` });
+    };
+    xhr.send(formData);
+  });
 }

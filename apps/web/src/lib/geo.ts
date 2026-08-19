@@ -1,4 +1,5 @@
 import type {
+  DamageFeatureCollection,
   GeoJsonFeature,
   GeoJsonFeatureCollection,
   GeoJsonLineString,
@@ -136,6 +137,61 @@ export function computeRouteComparison(
     detourRatio,
     riskReduction,
   };
+}
+
+export interface BoundingBox {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/**
+ * The bounding box of every coordinate in a damage feature collection
+ * (`Point` and `Polygon` ring vertices alike), or `null` for an empty
+ * collection — never a fabricated default location. Trusts the feature
+ * collection's coordinates exactly as given, the same convention
+ * `components/map/command-map.tsx` uses when auto-fitting the viewport to
+ * real data (see `docs/architecture/frontend.md`, "Damage visualization").
+ */
+export function computeFeatureBounds(collection: DamageFeatureCollection): BoundingBox | null {
+  let west = Infinity;
+  let south = Infinity;
+  let east = -Infinity;
+  let north = -Infinity;
+  let found = false;
+
+  for (const feature of collection.features) {
+    const positions: GeoJsonPosition[] =
+      feature.geometry.type === "Point"
+        ? [feature.geometry.coordinates]
+        : feature.geometry.coordinates.flat();
+    for (const [lon, lat] of positions) {
+      found = true;
+      if (lon < west) west = lon;
+      if (lon > east) east = lon;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+    }
+  }
+
+  return found ? { west, south, east, north } : null;
+}
+
+const EARTH_RADIUS_KM = 6371;
+
+/**
+ * Approximate ground area of a bounding box in km², using an
+ * equirectangular approximation — accurate enough at the neighborhood/city
+ * scale this project operates at (the same order of magnitude
+ * `formatDistanceMeters` targets). Deterministic arithmetic over real
+ * coordinates: "calculated," not a guess (see `lib/data-provenance.ts`).
+ */
+export function boundingBoxAreaKm2(box: BoundingBox): number {
+  const midLatRad = ((box.north + box.south) / 2) * (Math.PI / 180);
+  const widthKm = (box.east - box.west) * (Math.PI / 180) * EARTH_RADIUS_KM * Math.cos(midLatRad);
+  const heightKm = (box.north - box.south) * (Math.PI / 180) * EARTH_RADIUS_KM;
+  return Math.abs(widthKm * heightKm);
 }
 
 export function formatDistanceMeters(meters: number | null): string {

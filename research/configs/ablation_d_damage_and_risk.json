@@ -1,0 +1,5 @@
+{
+  "name": "ablation_d_damage_and_risk",
+  "description": "Ablation D: damage + road risk, no hazard.",
+  "ablation": { "use_damage": true, "use_road_risk": true, "use_hazard": false }
+}

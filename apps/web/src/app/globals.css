@@ -25,6 +25,9 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
+  --glass-bg: oklch(1 0 0 / 55%);
+  --glass-border: oklch(0 0 0 / 8%);
+  --glass-highlight: oklch(1 0 0 / 40%);
 }
 
 .dark {
@@ -46,6 +49,9 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+  --glass-bg: oklch(0.205 0 0 / 55%);
+  --glass-border: oklch(1 0 0 / 10%);
+  --glass-highlight: oklch(1 0 0 / 6%);
 }
 
 @theme inline {
@@ -82,4 +88,41 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/**
+ * Shared "glass surface" look used by floating chrome over the map (top
+ * bar, map overlay buttons, panel rail) — centralizes what was previously
+ * ad hoc `bg-background/70 backdrop-blur-md` / `border-white/10` usage
+ * (the latter was invisible in light mode). See
+ * `docs/architecture/frontend.md`, "Design system".
+ */
+@utility glass-panel {
+  background-color: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+@utility glass-panel-elevated {
+  background-color: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow:
+    0 12px 32px -12px oklch(0 0 0 / 45%),
+    inset 0 1px 0 0 var(--glass-highlight);
+}
+
+/* Landing-hero-only display type; the dashboard keeps its existing
+   typographic conventions (CardTitle, etc.) unchanged. */
+@utility text-hero {
+  letter-spacing: -0.02em;
+  font-weight: 600;
+  line-height: 1.05;
+}
+
+@utility text-hero-sub {
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }

@@ -3,13 +3,10 @@
 import * as React from "react";
 import { MapPinOff } from "lucide-react";
 
-import { BriefingPanel } from "@/components/command-center/briefing-panel";
-import { DamageStatsPanel } from "@/components/command-center/damage-stats-panel";
+import { AnalysisWorkspace } from "@/components/command-center/analysis-workspace";
 import { IncidentStatusBar } from "@/components/command-center/incident-status-bar";
 import type { ClientAnalysisState } from "@/components/command-center/analysis-state";
-import { RoadRiskPanel } from "@/components/command-center/road-risk-panel";
-import { RouteComparisonPanel } from "@/components/command-center/route-comparison-panel";
-import { UploadPanel } from "@/components/command-center/upload-panel";
+import { ResultsPanelGrid } from "@/components/command-center/results-panel-grid";
 import { CommandMapLoader } from "@/components/map/command-map-loader";
 import { MapLegend } from "@/components/map/map-legend";
 import { Button } from "@/components/ui/button";
@@ -47,6 +44,7 @@ export function CommandCenter() {
   const togglePanels = useUiStore((state) => state.toggleSidebar);
 
   const upload = useUploadAnalysis();
+  const [uploadProgress, setUploadProgress] = React.useState<number | null>(null);
   const analysis = useAnalysis(isDemoMode ? null : activeAnalysisId);
   const isCompleted = !isDemoMode && analysis.data?.status === "completed";
 
@@ -100,7 +98,7 @@ export function CommandCenter() {
       />
 
       <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="relative min-h-[420px] overflow-hidden rounded-xl border border-white/10 lg:min-h-0">
+        <div className="glass-panel relative min-h-[420px] overflow-hidden rounded-xl lg:min-h-0">
           <CommandMapLoader
             damage={damage?.available ? damage.feature_collection : null}
             distanceOnlyRoute={distanceOnlyRoute}
@@ -149,16 +147,22 @@ export function CommandCenter() {
             hasActiveAnalysis={activeAnalysisId !== null}
             state={analysisState}
             failure={analysis.data?.failure ?? null}
+            uploadProgress={uploadProgress}
             uploadErrorMessage={upload.isError ? upload.error.message : null}
-            onFileSelected={(file) =>
-              upload.mutate(file, {
-                onSuccess: (result) => {
-                  if (result.ok) setActiveAnalysisId(result.data.analysis_id);
+            onFileSelected={(file) => {
+              setUploadProgress(null);
+              upload.mutate(
+                { file, onProgress: (loaded, total) => setUploadProgress(total > 0 ? loaded / total : null) },
+                {
+                  onSuccess: (result) => {
+                    if (result.ok) setActiveAnalysisId(result.data.analysis_id);
+                  },
                 },
-              })
-            }
+              );
+            }}
             onReset={() => {
               setActiveAnalysisId(null);
+              setUploadProgress(null);
               upload.reset();
             }}
           />

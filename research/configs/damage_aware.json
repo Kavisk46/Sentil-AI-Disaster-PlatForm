@@ -1,0 +1,5 @@
+{
+  "name": "damage_aware",
+  "description": "Baseline B: edge cost = distance + a naive (unweighted, undecayed) damage-proximity penalty. See research/experiments/routing/cost_functions.py for why this differs from risk_aware.",
+  "ablation": { "use_damage": true, "use_road_risk": false, "use_hazard": false }
+}

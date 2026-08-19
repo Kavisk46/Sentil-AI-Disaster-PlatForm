@@ -1,0 +1,35 @@
+[project]
+name = "sentinelai-research"
+version = "0.1.0"
+description = "SentinelAI research-evaluation framework (Milestone 10) — measures routing/damage/hazard/LLM behavior against the real backend; not a shipped product feature."
+requires-python = ">=3.12"
+# Deliberately zero third-party dependencies of its own: everything here
+# reuses `apps/api`'s already-installed stack (pydantic, pytest, ruff,
+# mypy) via the shared `apps/api/.venv` — see research/README.md
+# ("Running the framework"). No matplotlib/scipy/numpy: figures are
+# generated as dependency-free SVG (research/core/figures.py) and the
+# significance test is a from-scratch Student's t implementation
+# (research/core/metrics.py), the same "reuse the standard library before
+# reaching for a new dependency" discipline the rest of this repo follows
+# (e.g. Milestone 7's `urllib.request` instead of a new HTTP client).
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9.0", "ruff>=0.7,<1.0", "mypy>=1.13,<2.0"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+mypy_path = "../apps/api"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

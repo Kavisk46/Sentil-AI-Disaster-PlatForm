@@ -1,0 +1,5 @@
+{
+  "name": "ablation_a_none",
+  "description": "Ablation A: no damage, no road risk, no hazard. Identical to shortest_path.",
+  "ablation": { "use_damage": false, "use_road_risk": false, "use_hazard": false }
+}

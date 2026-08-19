@@ -36,6 +36,7 @@ export const DEMO_DAMAGE_MAP: DamageMapResponse = {
   reason: null,
   feature_collection: {
     type: "FeatureCollection",
+    coordinate_reference_system: "EPSG:4326",
     features: [
       {
         type: "Feature",

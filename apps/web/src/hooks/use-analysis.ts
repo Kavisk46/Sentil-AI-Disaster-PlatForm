@@ -9,10 +9,19 @@ const DAMAGE_MAP_KEY = (id: string) => ["damage-map", id] as const;
 /** `POST /api/v1/analysis` — kicks off the upload -> queued -> processing
  * -> completed/failed lifecycle. On success, the caller is responsible for
  * setting the returned `analysis_id` as the active analysis (see
- * `store/incident-store.ts`) so `useAnalysis` starts polling it. */
+ * `store/incident-store.ts`) so `useAnalysis` starts polling it. Accepts
+ * an optional `onProgress` (real byte counts, see
+ * `lib/api-client.ts::apiUpload`) alongside the file, since
+ * TanStack Query's `mutate()` passes a single variables object. */
 export function useUploadAnalysis() {
   return useMutation({
-    mutationFn: (file: File) => uploadAnalysis(file),
+    mutationFn: ({
+      file,
+      onProgress,
+    }: {
+      file: File;
+      onProgress?: (loaded: number, total: number) => void;
+    }) => uploadAnalysis(file, onProgress),
   });
 }
 

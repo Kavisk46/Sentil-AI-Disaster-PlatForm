@@ -1,0 +1,5 @@
+{
+  "name": "shortest_path",
+  "description": "Baseline A: edge cost = distance only. No damage or road-risk signal is used.",
+  "ablation": { "use_damage": false, "use_road_risk": false, "use_hazard": false }
+}

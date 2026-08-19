@@ -1,0 +1,5 @@
+{
+  "name": "ablation_e_full_with_hazard",
+  "description": "Ablation E: damage + road risk + hazard. The hazard term is currently inert — SentinelAI has no hazard subsystem — so this is mechanically identical to ablation_d_damage_and_risk today. Identical to full_sentinelai.",
+  "ablation": { "use_damage": true, "use_road_risk": true, "use_hazard": true }
+}

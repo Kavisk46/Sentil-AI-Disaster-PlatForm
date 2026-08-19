@@ -1,0 +1,5 @@
+{
+  "name": "ablation_b_damage_only",
+  "description": "Ablation B: damage only. Identical to damage_aware.",
+  "ablation": { "use_damage": true, "use_road_risk": false, "use_hazard": false }
+}

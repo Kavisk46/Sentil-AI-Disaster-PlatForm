@@ -1,10 +1,9 @@
-import { redirect } from "next/navigation";
+import { LandingPage } from "@/components/landing/landing-page";
 
 /**
- * The engineering foundation ships no marketing/landing content — the root
- * route simply forwards to the dashboard shell that later sprints build
- * out.
+ * Stage 1 of the flow: hero + upload. See
+ * `docs/architecture/frontend.md`, "Landing page and hero map".
  */
 export default function RootPage() {
-  redirect("/dashboard");
+  return <LandingPage />;
 }

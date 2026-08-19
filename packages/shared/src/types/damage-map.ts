@@ -19,7 +19,10 @@ export interface DamageFeatureProperties {
 export type DamageFeatureCollection = GeoJsonFeatureCollection<
   GeoJsonPoint | GeoJsonPolygon,
   DamageFeatureProperties
->;
+> & {
+  /** `IMAGE` is source-image pixels; only `EPSG:4326` is map-safe WGS84. */
+  coordinate_reference_system: "IMAGE" | "EPSG:4326";
+};
 
 export interface DamageMapResponse {
   analysis_id: string;
