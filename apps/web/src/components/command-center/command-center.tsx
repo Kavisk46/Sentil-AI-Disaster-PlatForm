@@ -11,16 +11,25 @@ import { CommandMapLoader } from "@/components/map/command-map-loader";
 import { MapLegend } from "@/components/map/map-legend";
 import { Button } from "@/components/ui/button";
 import { useAnalysis, useDamageMap, useUploadAnalysis } from "@/hooks/use-analysis";
+import {
+  useAnalysisIntelligenceContext,
+  useAnalysisRecommendations,
+  useAnalysisSearchZones,
+} from "@/hooks/use-analysis-intelligence";
 import { useIncidentSummary, useRegenerateIncidentSummary } from "@/hooks/use-incident-summary";
 import { useRoadRisk } from "@/hooks/use-road-risk";
 import { useRouteComparison } from "@/hooks/use-routing";
+import type { ResourceView } from "@/components/command-center/intelligence-panel";
 import {
   DEMO_DAMAGE_MAP,
   DEMO_DAMAGE_SUMMARY,
   DEMO_INCIDENT_BRIEFING,
+  DEMO_RECOMMENDATIONS,
+  DEMO_RESOURCE_CANDIDATES,
   DEMO_ROAD_RISK,
   DEMO_ROUTE_COMPARISON,
   DEMO_ROUTES,
+  DEMO_SEARCH_ZONES,
 } from "@/lib/demo/demo-data";
 import { useIncidentStore } from "@/store/incident-store";
 import { useUiStore } from "@/store/ui-store";
@@ -57,6 +66,18 @@ export function CommandCenter() {
     routeStart,
     routeDestination,
   );
+  const intelligenceContext = useAnalysisIntelligenceContext(
+    isDemoMode ? null : activeAnalysisId,
+    isCompleted,
+  );
+  const intelligenceSearchZones = useAnalysisSearchZones(
+    isDemoMode ? null : activeAnalysisId,
+    isCompleted,
+  );
+  const intelligenceRecommendations = useAnalysisRecommendations(
+    isDemoMode ? null : activeAnalysisId,
+    isCompleted,
+  );
 
   const analysisState: ClientAnalysisState = isDemoMode
     ? "completed"
@@ -88,6 +109,17 @@ export function CommandCenter() {
       : null;
   const totalStructures = damageSummary?.total_buildings ?? null;
 
+  const isBriefingAvailable = isDemoMode || isCompleted;
+
+  const mapSearchZones = isDemoMode
+    ? DEMO_SEARCH_ZONES
+    : (intelligenceSearchZones.data?.search_zones ?? null);
+  const topCandidate = isDemoMode
+    ? DEMO_RESOURCE_CANDIDATES[0]
+    : intelligenceRecommendations.data?.resource_candidates[0];
+  const mapRecommendedRoute =
+    topCandidate?.route_feasibility.status === "computed" ? (topCandidate.route ?? null) : null;
+
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
       <IncidentStatusBar
@@ -103,6 +135,8 @@ export function CommandCenter() {
             damage={damage?.available ? damage.feature_collection : null}
             distanceOnlyRoute={distanceOnlyRoute}
             riskAwareRoute={riskAwareRoute}
+            searchZones={mapSearchZones}
+            recommendedRoute={mapRecommendedRoute}
             routeStart={effectiveRouteStart}
             routeDestination={effectiveRouteDestination}
             onMapClick={
@@ -118,7 +152,7 @@ export function CommandCenter() {
               <Button
                 size="sm"
                 variant="secondary"
-                className="bg-background/70 backdrop-blur-md"
+                className="glass-panel"
                 onClick={clearRoutePoints}
               >
                 <MapPinOff className="size-3.5" />
@@ -129,7 +163,7 @@ export function CommandCenter() {
           <Button
             size="sm"
             variant="secondary"
-            className="absolute bottom-3 right-3 z-10 bg-background/70 backdrop-blur-md lg:hidden"
+            className="glass-panel absolute bottom-3 right-3 z-10 lg:hidden"
             onClick={togglePanels}
             aria-expanded={isPanelsOpen}
             aria-controls="command-center-panels"
@@ -142,10 +176,10 @@ export function CommandCenter() {
           id="command-center-panels"
           className={`${isPanelsOpen ? "flex" : "hidden"} flex-col gap-4 lg:flex lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto lg:pr-1`}
         >
-          <UploadPanel
+          <AnalysisWorkspace
             isDemoMode={isDemoMode}
             hasActiveAnalysis={activeAnalysisId !== null}
-            state={analysisState}
+            analysisState={analysisState}
             failure={analysis.data?.failure ?? null}
             uploadProgress={uploadProgress}
             uploadErrorMessage={upload.isError ? upload.error.message : null}
@@ -167,50 +201,93 @@ export function CommandCenter() {
             }}
           />
 
-          <RouteComparisonPanel
-            comparison={isDemoMode ? DEMO_ROUTE_COMPARISON : (routeComparison.data ?? null)}
-            hasSelectedPoints={isDemoMode || (routeStart !== null && routeDestination !== null)}
-            isLoading={!isDemoMode && routeComparison.isLoading}
-            isError={!isDemoMode && routeComparison.isError}
-            errorMessage={!isDemoMode ? routeComparison.error?.message : undefined}
-          />
-
-          <BriefingPanel
-            briefing={briefing ?? null}
-            isLoading={!isDemoMode && summary.isLoading && isCompleted}
-            isError={!isDemoMode && summary.isError}
-            errorMessage={!isDemoMode ? summary.error?.message : undefined}
-            isAvailable={isDemoMode || isCompleted}
-            onRegenerate={
-              isDemoMode
+          <ResultsPanelGrid
+            damageStats={{
+              summary: damageSummary,
+              available: damageSummaryAvailable,
+              reason: damageSummaryReason,
+              highPriorityCount: briefing?.affected_structures.high_priority_count ?? null,
+              isLoading: !isDemoMode && analysis.isLoading,
+              isError: !isDemoMode && analysis.isError,
+              errorMessage: !isDemoMode ? analysis.error?.message : undefined,
+            }}
+            roadRisk={{
+              edges: roadRiskData?.edges ?? [],
+              available: roadRiskData?.available ?? false,
+              reason: roadRiskData?.reason ?? null,
+              isLoading: !isDemoMode && roadRisk.isLoading && isCompleted,
+              isError: !isDemoMode && roadRisk.isError,
+              errorMessage: !isDemoMode ? roadRisk.error?.message : undefined,
+            }}
+            affectedArea={{
+              featureCollection: damage?.feature_collection ?? null,
+              damageAvailable: damage?.available ?? false,
+              damageReason: damage?.reason ?? null,
+              isDamageLoading: !isDemoMode && damageMap.isLoading && isCompleted,
+              isDamageError: !isDemoMode && damageMap.isError,
+              damageErrorMessage: !isDemoMode ? damageMap.error?.message : undefined,
+              priorityArea: briefing?.priority_area ?? null,
+              isBriefingAvailable,
+            }}
+            routeComparison={{
+              comparison: isDemoMode ? DEMO_ROUTE_COMPARISON : (routeComparison.data ?? null),
+              hasSelectedPoints: isDemoMode || (routeStart !== null && routeDestination !== null),
+              isLoading: !isDemoMode && routeComparison.isLoading,
+              isError: !isDemoMode && routeComparison.isError,
+              errorMessage: !isDemoMode ? routeComparison.error?.message : undefined,
+            }}
+            intelligence={{
+              contextAvailable: isDemoMode || (intelligenceContext.data?.context_available ?? false),
+              contextUnavailableReason: isDemoMode
+                ? null
+                : (intelligenceContext.data?.context_unavailable_reason ?? null),
+              isSimulated: isDemoMode,
+              searchZones: isDemoMode
+                ? DEMO_SEARCH_ZONES
+                : (intelligenceSearchZones.data?.search_zones ?? []),
+              isSearchZonesLoading: !isDemoMode && intelligenceSearchZones.isLoading && isCompleted,
+              isSearchZonesError: !isDemoMode && intelligenceSearchZones.isError,
+              searchZonesErrorMessage: !isDemoMode ? intelligenceSearchZones.error?.message : undefined,
+              recommendations: isDemoMode
+                ? DEMO_RECOMMENDATIONS
+                : (intelligenceRecommendations.data?.recommendations ?? []),
+              isRecommendationsLoading:
+                !isDemoMode && intelligenceRecommendations.isLoading && isCompleted,
+              isRecommendationsError: !isDemoMode && intelligenceRecommendations.isError,
+              recommendationsErrorMessage: !isDemoMode
+                ? intelligenceRecommendations.error?.message
+                : undefined,
+              topSearchZoneId: isDemoMode
+                ? (DEMO_SEARCH_ZONES[0]?.id ?? null)
+                : (intelligenceRecommendations.data?.top_search_zone_id ?? null),
+              resourceView: {
+                kind: "candidates",
+                candidates: isDemoMode
+                  ? DEMO_RESOURCE_CANDIDATES
+                  : (intelligenceRecommendations.data?.resource_candidates ?? []),
+              } satisfies ResourceView,
+              resourcesAreDemo: isDemoMode || (intelligenceRecommendations.data?.resources_are_demo ?? true),
+              roadsAvailable: isDemoMode || (intelligenceContext.data?.roads_available ?? false),
+              roadsUnavailableReason: isDemoMode
+                ? null
+                : (intelligenceContext.data?.roads_unavailable_reason ?? null),
+            }}
+            briefing={{
+              briefing: briefing ?? null,
+              isLoading: !isDemoMode && summary.isLoading && isCompleted,
+              isError: !isDemoMode && summary.isError,
+              errorMessage: !isDemoMode ? summary.error?.message : undefined,
+              isAvailable: isBriefingAvailable,
+              onRegenerate: isDemoMode
                 ? undefined
                 : () =>
                     regenerate.mutate(
                       routeStart && routeDestination
                         ? { start: routeStart, destination: routeDestination }
                         : undefined,
-                    )
-            }
-            isRegenerating={regenerate.isPending}
-          />
-
-          <DamageStatsPanel
-            summary={damageSummary}
-            available={damageSummaryAvailable}
-            reason={damageSummaryReason}
-            highPriorityCount={briefing?.affected_structures.high_priority_count ?? null}
-            isLoading={!isDemoMode && analysis.isLoading}
-            isError={!isDemoMode && analysis.isError}
-            errorMessage={!isDemoMode ? analysis.error?.message : undefined}
-          />
-
-          <RoadRiskPanel
-            edges={roadRiskData?.edges ?? []}
-            available={roadRiskData?.available ?? false}
-            reason={roadRiskData?.reason ?? null}
-            isLoading={!isDemoMode && roadRisk.isLoading && isCompleted}
-            isError={!isDemoMode && roadRisk.isError}
-            errorMessage={!isDemoMode ? roadRisk.error?.message : undefined}
+                    ),
+              isRegenerating: regenerate.isPending,
+            }}
           />
         </div>
       </div>

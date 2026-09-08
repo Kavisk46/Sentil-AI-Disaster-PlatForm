@@ -6,16 +6,17 @@ uses the repository root as its build context (not its own subdirectory),
 since the frontend is part of an npm workspaces monorepo and needs access to
 `packages/` at build time.
 
-| Dockerfile | Service | Status |
+| Dockerfile | Service(s) | Status |
 |---|---|---|
-| `api.Dockerfile` | Backend API (`apps/api`) | Implemented — Sprint 1 |
-| `web.Dockerfile` | Frontend web application (`apps/web`) | Implemented — Sprint 1 |
-| `ai.Dockerfile` | AI engine (detection & briefing generation) | Not yet implemented — Phase 4 |
+| `api.Dockerfile` | `api`, `worker`, `migrate` (`apps/api` — one image, different commands) | Implemented |
+| `web.Dockerfile` | `web` (`apps/web`) | Implemented |
 
-Sprint 1 provisions the frontend and backend only; no database or cache is
-part of the stack yet. PostgreSQL/PostGIS will be added here alongside the
-domain models introduced in Phase 2 — see
-[`PROJECT_ROADMAP.md`](../PROJECT_ROADMAP.md).
+Milestone F5 ("Production Infrastructure") added real persistence
+(PostgreSQL), a background job queue (Redis + RQ), and a separate worker
+process that eagerly loads the real CLIP damage-classification model at
+its own startup — the API process itself never does. See
+[`docs/architecture/production.md`](../docs/architecture/production.md)
+for the full architecture.
 
 ## Running locally
 
@@ -25,3 +26,18 @@ docker compose up --build
 
 - API: http://localhost:8000 (docs at `/docs`)
 - Web: http://localhost:3000
+- Readiness: http://localhost:8000/ready
+- Model status: http://localhost:8000/api/v1/model/status
+
+`migrate` runs `alembic upgrade head` once and exits before `api`/`worker`
+start — a fresh `docker compose up` always applies the current schema to
+a fresh Postgres volume. The worker's first CLIP load (40-150s, see
+`apps/api/README.md`, "Milestone F4") happens in the background; `api`
+and `web` are usable immediately regardless — `GET /api/v1/model/status`
+honestly reports `MODEL_LOADING` until it finishes.
+
+To reset entirely (drop all data, re-download the model on next start):
+
+```bash
+docker compose down -v
+```

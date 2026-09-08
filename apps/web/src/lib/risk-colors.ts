@@ -1,4 +1,11 @@
-import type { AccessibilityStatus, ConfidenceLevel, DamageClass, IncidentSeverity, RiskLevel } from "@sentinelai/shared";
+import type {
+  AccessibilityStatus,
+  ConfidenceLevel,
+  DamageClass,
+  IncidentSeverity,
+  RiskLevel,
+  SearchPriorityLevel,
+} from "@sentinelai/shared";
 
 /**
  * Single source of truth for every color/label pairing used to represent
@@ -142,6 +149,12 @@ export const CONFIDENCE_STYLE: Record<ConfidenceLevel, LevelStyle> = {
   low: RISK_LEVEL_STYLE.high,
   unknown: INCIDENT_SEVERITY_STYLE.unknown,
 };
+
+/** F3: search-zone priority uses the exact same 4-level scale/colors as
+ * road risk — both are "how urgent is this" scales, so reusing
+ * `RISK_LEVEL_STYLE` keeps the visual language consistent across panels
+ * (same reasoning `INCIDENT_SEVERITY_STYLE` already applies above). */
+export const SEARCH_PRIORITY_STYLE: Record<SearchPriorityLevel, LevelStyle> = RISK_LEVEL_STYLE;
 
 export const ROUTE_MODE_STYLE = {
   risk_aware: { hex: "#38bdf8", label: "Risk-aware", className: "text-sky-400" },

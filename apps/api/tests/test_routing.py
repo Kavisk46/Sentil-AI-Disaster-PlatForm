@@ -17,6 +17,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.api.deps import get_road_network_repository, get_spatial_repository
@@ -918,8 +919,8 @@ def test_compare_routes_reports_differences_when_routes_differ() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_routing_api_returns_422_for_invalid_coordinates(client) -> None:  # type: ignore[no-untyped-def]
-    response = client.post(
+def test_routing_api_returns_422_for_invalid_coordinates(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
         "/api/v1/routing",
         json={
             "analysis_id": str(uuid4()),
@@ -931,8 +932,8 @@ def test_routing_api_returns_422_for_invalid_coordinates(client) -> None:  # typ
     assert response.status_code == 422
 
 
-def test_routing_api_returns_422_for_missing_mode(client) -> None:  # type: ignore[no-untyped-def]
-    response = client.post(
+def test_routing_api_returns_422_for_missing_mode(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
         "/api/v1/routing",
         json={
             "analysis_id": str(uuid4()),
@@ -943,8 +944,8 @@ def test_routing_api_returns_422_for_missing_mode(client) -> None:  # type: igno
     assert response.status_code == 422
 
 
-def test_routing_api_returns_404_for_unknown_analysis(client) -> None:  # type: ignore[no-untyped-def]
-    response = client.post(
+def test_routing_api_returns_404_for_unknown_analysis(analysis_client: TestClient) -> None:
+    response = analysis_client.post(
         "/api/v1/routing",
         json={
             "analysis_id": str(uuid4()),

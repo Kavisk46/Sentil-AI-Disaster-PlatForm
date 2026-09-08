@@ -8,21 +8,20 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
     css: false,
-    // The default `forks` pool spawns child processes via `child_process`,
-    // which times out under this project's sandboxed shell. `threads`
-    // (worker_threads) avoids process-spawn overhead entirely and is a
-    // fully supported Vitest pool — not a correctness compromise, just an
-    // execution-environment accommodation.
-    pool: "threads",
-    // This environment is resource-constrained enough that spawning many
-    // worker threads in parallel intermittently times out mid-run (some
-    // files never get a worker). Forcing a single, reused worker thread
-    // for the whole run trades wall-clock speed for reliability, which
-    // matters more here than in a normal CI runner. Vitest 4 removed the
-    // old `poolOptions.threads.singleThread` option entirely (and
-    // top-level `singleThread` was never a real option, despite an
-    // earlier version of this file assuming so) — `fileParallelism: false`
-    // is the documented replacement; it explicitly forces `maxWorkers` to 1.
+    // Empirically re-verified in this exact sandboxed shell (2026-08-22):
+    // the `threads` pool (worker_threads) never completes a run here —
+    // every file times out with "[vitest-pool-runner]: Timeout waiting for
+    // worker to respond" before a single test executes, regardless of
+    // `fileParallelism`/`maxWorkers`. `forks` (child_process), by
+    // contrast, runs reliably (confirmed on both a single file and the
+    // full suite). This directly contradicts an earlier version of this
+    // file's comment claiming the opposite — environments (or the
+    // sandbox's process/thread-spawn characteristics) can shift over
+    // time; re-verify empirically rather than trusting a stale comment.
+    pool: "forks",
+    // Mirrors the same "reliability over wall-clock speed" reasoning the
+    // previous `threads`+single-worker configuration used, just via the
+    // fork-pool's equivalent knob.
     fileParallelism: false,
     testTimeout: 15_000,
   },

@@ -1,24 +1,91 @@
-# SentinelAI local development stack — Sprint 1 (engineering foundation).
+# SentinelAI local development stack (Milestone F5 — production
+# infrastructure).
 #
-# Runs the frontend and backend together, each built from its own Dockerfile
-# under docker/. No database or cache is provisioned yet: Sprint 1 is
-# deliberately backend/frontend plumbing only, with no persistence layer.
-# Postgres/PostGIS will be introduced here alongside the domain models in
-# Phase 2 — see PROJECT_ROADMAP.md.
+# api        — FastAPI, serves HTTP only. Never loads the damage-
+#              detection model itself (see docs/architecture/production.md,
+#              "Model lifecycle") — only enqueues jobs and reads status.
+# worker     — background job processor (RQ). Eagerly loads the real
+#              CLIP model once at startup, then processes queued
+#              analyses. Same image as `api`, different command.
+# migrate    — one-shot: runs Alembic migrations, then exits. `api`/
+#              `worker` wait for it to succeed before starting.
+# postgres   — analysis/building-damage persistence.
+# redis      — job queue (RQ) + published model-readiness status.
+# web        — the Next.js frontend, unchanged from Sprint 1.
+#
+# `uploads-data` is a shared volume between `api` (writes an uploaded
+# image) and `worker` (reads it back for inference) — two separate
+# containers, so this can't be a container-local path. `model-cache` is
+# a separate, worker-only volume so the CLIP checkpoint downloads once
+# and survives container restarts/rebuilds.
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sentinelai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sentinelai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sentinelai}
+      POSTGRES_DB: ${POSTGRES_DB:-sentinelai}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sentinelai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sentinelai-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: sentinelai-migrate
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentinelai}:${POSTGRES_PASSWORD:-sentinelai}@postgres:5432/${POSTGRES_DB:-sentinelai}
+
   api:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
     container_name: sentinelai-api
     restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     env_file:
       - apps/api/.env
     environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentinelai}:${POSTGRES_PASSWORD:-sentinelai}@postgres:5432/${POSTGRES_DB:-sentinelai}
+      REDIS_URL: redis://redis:6379/0
       # Compose's service DNS name, so the API's CORS allow-list can include
       # the frontend even though it isn't reachable at localhost internally.
       BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000}
+    volumes:
+      - uploads-data:/app/storage/uploads
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
@@ -26,6 +93,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    container_name: sentinelai-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker.main"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    env_file:
+      - apps/api/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-sentinelai}:${POSTGRES_PASSWORD:-sentinelai}@postgres:5432/${POSTGRES_DB:-sentinelai}
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - uploads-data:/app/storage/uploads
+      - model-cache:/model-cache
 
   web:
     build:
@@ -40,3 +128,9 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     ports:
       - "${WEB_PORT:-3000}:3000"
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:
+  model-cache:

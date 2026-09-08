@@ -1,7 +1,13 @@
 """Analysis lifecycle endpoints.
 
 `POST /api/v1/analysis` accepts an aerial/satellite image, creates an
-analysis record, and dispatches it for processing. `GET
+analysis record, and dispatches it for processing. Milestone F5: the
+analysis record and its buildings are now persisted in PostgreSQL (not an
+in-process dict), and processing is dispatched onto a Redis-backed job
+queue (`app/services/job_queue.py`) for a separate worker process
+(`app/worker/`) to actually run — the API process itself never
+constructs or loads the real inference model, and this response's shape
+and status code (`201`) are unchanged from Milestone 4. `GET
 /api/v1/analysis/{analysis_id}` returns its current lifecycle state and,
 once available, its result. `GET
 /api/v1/analysis/{analysis_id}/damage-map` (Milestone 5) returns the
@@ -11,7 +17,16 @@ risk-aware road representation correlating that same result with the
 OpenStreetMap road graph (Milestone 6A). `GET`/`POST
 /api/v1/analysis/{analysis_id}/summary` (Milestone 7) return an
 AI-assisted, structured incident briefing synthesized from that same
-damage/road-risk/(optional) routing data.
+damage/road-risk/(optional) routing data. `GET
+/api/v1/analysis/{analysis_id}/intelligence[/search-zones|/recommendations]`
+(**Milestone F3**) adapt that same real analysis data into F2's
+Disaster Intelligence Core domain model and run its deterministic
+search-priority/capability-matching/recommendation pipeline against it —
+see `app/intelligence/analysis_adapter.py` and
+`app/services/analysis_intelligence_service.py`. Distinct from
+`/api/v1/intelligence/{disaster_id}...` (F2, unchanged): that path
+serves the deterministic demo scenario by a `disaster_id`; this path
+serves real analysis-derived data by the existing `analysis_id`.
 
 Routes translate HTTP <-> schema and delegate; validation, storage, and
 lifecycle orchestration all live in `AnalysisService`/
@@ -27,18 +42,26 @@ pipelines).
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, File, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from redis.exceptions import RedisError
 
 from app.api.deps import (
+    AnalysisIntelligenceServiceDep,
     AnalysisProcessingServiceDep,
     AnalysisServiceDep,
     DamageMapServiceDep,
     IncidentIntelligenceServiceDep,
+    JobQueueDep,
     RoadRiskServiceDep,
 )
 from app.incident.schemas import IncidentBriefing
 from app.ml.schemas import DamageAnalysis
 from app.schemas.analysis import AnalysisCreateResponse
+from app.schemas.analysis_intelligence import (
+    AnalysisIntelligenceContextResponse,
+    AnalysisRecommendationsResponse,
+    AnalysisSearchZonesResponse,
+)
 from app.schemas.damage_map import DamageMapResponse
 from app.schemas.incident import IncidentSummaryRequest
 from app.schemas.road_risk import RoadRiskResponse
@@ -62,17 +85,36 @@ ImageUpload = Annotated[
 def create_analysis(
     analysis_service: AnalysisServiceDep,
     processing_service: AnalysisProcessingServiceDep,
-    background_tasks: BackgroundTasks,
+    job_queue: JobQueueDep,
     image: ImageUpload,
 ) -> AnalysisCreateResponse:
     upload = analysis_service.create_analysis(image)
 
-    # Fast, synchronous hand-off to `queued`, then the actual pipeline
-    # (queued -> processing -> completed/failed) runs after this response
-    # has been sent — see app/services/analysis_processing_service.py for
-    # why this doesn't need Redis/Celery/Kafka.
+    # Fast hand-off to `queued`, committed to the database, *then*
+    # enqueued onto Redis — never the other way around (see
+    # `docs/architecture/production.md`, "Database transactions": a job
+    # must never reference an analysis id the database doesn't durably
+    # know about yet). The actual pipeline (queued -> processing ->
+    # completed/failed) now runs in a separate worker process
+    # (`app/worker/`), not FastAPI `BackgroundTasks` — the API process
+    # returns immediately regardless of how long inference takes.
     queued = processing_service.enqueue(upload.analysis_id)
-    background_tasks.add_task(processing_service.process, upload.analysis_id)
+    try:
+        job_queue.enqueue_analysis(upload.analysis_id)
+    except RedisError as exc:
+        # The analysis record is already durably persisted (status
+        # `queued`) — never lost, even though it was never actually
+        # enqueued. A clean, honest 503 rather than a bare, unhandled
+        # 500: the client can retry (a fresh upload, or — once a manual
+        # requeue operation exists — the same analysis_id), and the
+        # record itself remains inspectable via `GET .../{analysis_id}`.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The analysis was recorded but could not be queued for processing "
+                "(job queue unavailable). It remains retrievable; please try again."
+            ),
+        ) from exc
 
     return AnalysisCreateResponse(
         analysis_id=upload.analysis_id, status=queued.status, filename=upload.filename
@@ -144,3 +186,42 @@ def regenerate_incident_summary(
 ) -> IncidentBriefing:
     route_query = request.route if request is not None else None
     return incident_service.get_summary(analysis_id, route_query)
+
+
+@router.get(
+    "/{analysis_id}/intelligence",
+    response_model=AnalysisIntelligenceContextResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get the Disaster Intelligence Core context derived from an analysis (Milestone F3)",
+)
+def get_analysis_intelligence_context(
+    analysis_id: UUID,
+    service: AnalysisIntelligenceServiceDep,
+) -> AnalysisIntelligenceContextResponse:
+    return service.get_context_summary(analysis_id)
+
+
+@router.get(
+    "/{analysis_id}/intelligence/search-zones",
+    response_model=AnalysisSearchZonesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get search zones scored from an analysis's real damage data (Milestone F3)",
+)
+def get_analysis_search_zones(
+    analysis_id: UUID,
+    service: AnalysisIntelligenceServiceDep,
+) -> AnalysisSearchZonesResponse:
+    return service.get_search_zones(analysis_id)
+
+
+@router.get(
+    "/{analysis_id}/intelligence/recommendations",
+    response_model=AnalysisRecommendationsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get rule-based recommendations derived from an analysis (Milestone F3)",
+)
+def get_analysis_recommendations(
+    analysis_id: UUID,
+    service: AnalysisIntelligenceServiceDep,
+) -> AnalysisRecommendationsResponse:
+    return service.get_recommendations(analysis_id)

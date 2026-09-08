@@ -23,6 +23,16 @@ from app.schemas.analysis import AnalysisStatus
 _SEVERE_CLASSES = frozenset({DamageClass.MAJOR, DamageClass.DESTROYED})
 
 
+class PostprocessingError(RuntimeError):
+    """Raised when a model's raw detections cannot be assembled into a
+    valid `DamageAnalysis` (Milestone F4) — e.g. a malformed detection
+    that fails `BuildingDamage`'s own validation. Maps to
+    `AnalysisErrorCode.POSTPROCESSING_FAILURE`
+    (`app/services/analysis_processing_service.py`), distinct from
+    `INFERENCE_FAILURE` (the model itself failing) so the two stages
+    remain independently diagnosable."""
+
+
 def summarize_buildings(buildings: Sequence[BuildingDamage]) -> DamageSummary:
     """Aggregate per-building predictions into `DamageSummary` counts."""
     return DamageSummary(

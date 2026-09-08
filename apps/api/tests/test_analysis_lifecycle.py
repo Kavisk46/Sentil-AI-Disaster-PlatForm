@@ -21,7 +21,7 @@ from starlette.datastructures import Headers
 from app.api.deps import get_analysis_repository
 from app.core.config import Settings
 from app.ml.inference import DamageInferenceEngine
-from app.ml.model import ModelNotAvailableError, RawDetection
+from app.ml.model import ModelLoadError, ModelNotAvailableError, RawDetection
 from app.ml.schemas import DamageClass, DamageSummary, ModelStatus
 from app.schemas.analysis import AnalysisStatus
 from app.services.analysis_processing_service import AnalysisProcessingService
@@ -69,6 +69,41 @@ class _FakeFailingModel:
     def health(self) -> ModelStatus:
         return ModelStatus(
             model_loaded=True, model_name="fake-test-model", model_version="test", device="cpu"
+        )
+
+
+class _FakeModelLoadFailureModel:
+    """Simulates a real load attempt that genuinely failed (e.g. no
+    network fetching a pretrained checkpoint) — distinct from
+    `_AlwaysUnavailableModel` below (never configured/attempted at all).
+    Milestone F4."""
+
+    def load(self) -> None:
+        return None
+
+    def predict(self, image: object) -> list[RawDetection]:
+        raise ModelLoadError("simulated checkpoint download failure")
+
+    def health(self) -> ModelStatus:
+        return ModelStatus(
+            model_loaded=False, model_name="clip-test", model_version="openai", device="cpu"
+        )
+
+
+class _FakeInvalidDetectionModel:
+    """Returns a structurally-invalid detection (confidence outside
+    [0, 1]) — must surface as `POSTPROCESSING_FAILURE`, not silently pass
+    through or crash unpredictably. Milestone F4."""
+
+    def load(self) -> None:
+        return None
+
+    def predict(self, image: object) -> list[RawDetection]:
+        return [RawDetection(damage_class=DamageClass.MINOR, confidence=1.5)]
+
+    def health(self) -> ModelStatus:
+        return ModelStatus(
+            model_loaded=True, model_name="broken", model_version="test", device="cpu"
         )
 
 
@@ -254,8 +289,14 @@ def test_completed_analysis_has_a_real_result(
 
 
 def test_default_wiring_fails_with_model_unavailable(analysis_client: TestClient) -> None:
-    """No model override — exercises the *real*, production DI wiring
-    (UnavailableBuildingLocalizer), not a fake."""
+    """No model override, real DI wiring (not a fake) — but with real
+    inference explicitly disabled (`Settings.MODEL_ENABLED=False`, this
+    fixture's own default — see `conftest.py`), so this stays fast and
+    network-free like every other test in this file. `Settings()`'s own
+    *true* out-of-the-box default is `MODEL_ENABLED=True` (real CLIP
+    inference — see `tests/test_config.py` and
+    `tests/test_ml_real_inference_integration.py`, which prove that path
+    for real, at the cost of needing network access)."""
     analysis_id = _post_analysis(analysis_client)
 
     body = analysis_client.get(f"/api/v1/analysis/{analysis_id}").json()
@@ -285,6 +326,64 @@ def test_unexpected_inference_error_fails_with_inference_failure_code(
     # The raw exception text must never reach the client — only the
     # generic, safe message.
     assert "simulated inference crash" not in body["failure"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# 9b. Model load failure (Milestone F4) — distinct from MODEL_UNAVAILABLE
+# ---------------------------------------------------------------------------
+
+
+def test_model_load_failure_is_reported_distinctly_from_model_unavailable(
+    analysis_app_factory: Callable[..., FastAPI],
+) -> None:
+    app = analysis_app_factory(model=_FakeModelLoadFailureModel())
+    client = TestClient(app)
+
+    analysis_id = _post_analysis(client)
+    body = client.get(f"/api/v1/analysis/{analysis_id}").json()
+
+    assert body["status"] == "failed"
+    assert body["failure"]["code"] == "MODEL_LOAD_FAILURE"
+    assert "simulated checkpoint download failure" not in body["failure"]["message"]
+
+
+# ---------------------------------------------------------------------------
+# 9c. Preprocessing / postprocessing failures (Milestone F4)
+# ---------------------------------------------------------------------------
+
+
+def test_oversized_image_fails_with_preprocessing_failure_code(
+    analysis_app_factory: Callable[..., FastAPI],
+) -> None:
+    """`Settings.MODEL_MAX_IMAGE_DIM` is enforced end-to-end through the
+    real `DamageInferenceEngine` wiring (`app/api/deps.py`), even though
+    the model itself is a fake here — this is testing the preprocessing
+    gate, not the model.
+    """
+    app = analysis_app_factory(
+        Settings(MODEL_ENABLED=False, MODEL_MAX_IMAGE_DIM=10),
+        model=_FakeCompletingModel(),
+    )
+    client = TestClient(app)
+
+    analysis_id = _post_analysis(client)  # the shared 16x16 test image exceeds max_dim=10
+    body = client.get(f"/api/v1/analysis/{analysis_id}").json()
+
+    assert body["status"] == "failed"
+    assert body["failure"]["code"] == "PREPROCESSING_FAILURE"
+
+
+def test_invalid_model_detection_fails_with_postprocessing_failure_code(
+    analysis_app_factory: Callable[..., FastAPI],
+) -> None:
+    app = analysis_app_factory(model=_FakeInvalidDetectionModel())
+    client = TestClient(app)
+
+    analysis_id = _post_analysis(client)
+    body = client.get(f"/api/v1/analysis/{analysis_id}").json()
+
+    assert body["status"] == "failed"
+    assert body["failure"]["code"] == "POSTPROCESSING_FAILURE"
 
 
 # ---------------------------------------------------------------------------

@@ -51,14 +51,47 @@ end-to-end; carries no business data.
 { "name": "SentinelAI API", "version": "0.1.0", "environment": "development" }
 ```
 
+### `GET /api/v1/model/status`
+
+Whether the damage-classification model is enabled and actually loaded
+(Milestone F4) — see [`apps/api/README.md`](../../apps/api/README.md#milestone-f4--real-inference)
+for the full model-lifecycle design. Read-only; never triggers a load of
+its own (it reports on whatever the existing DI wiring already
+constructed/cached).
+
+**Response `200`, real inference enabled and loaded**
+
+```json
+{
+  "enabled": true,
+  "provider": "open_clip",
+  "status": {
+    "model_loaded": true,
+    "model_name": "deterministic-tile-localizer+ViT-B-32",
+    "model_version": "openai",
+    "device": "cpu"
+  }
+}
+```
+
+`enabled=false` means real inference was never attempted
+(`Settings.MODEL_ENABLED=false`) — every analysis will end
+`MODEL_UNAVAILABLE`, by configuration, not a fault. `enabled=true` with
+`status.model_loaded=false` means a real load was attempted and hasn't
+(yet) succeeded — check server logs. No error responses — always `200`.
+
 ### `POST /api/v1/analysis`
 
 Upload an aerial/satellite image, store it, and dispatch it for analysis.
 Returns immediately with status `queued` — it does not wait for inference
 to finish. See "Analysis lifecycle" in
 [`apps/api/README.md`](../../apps/api/README.md#analysis-lifecycle-milestone-4)
-for the full status model and why every analysis currently ends up
-`failed` (no trained model exists yet).
+for the full status model. As of Milestone F4, the default configuration
+performs real CPU-only model inference and a real image reaches
+`completed` — see
+[`apps/api/README.md`](../../apps/api/README.md#milestone-f4--real-inference).
+Setting `MODEL_ENABLED=false` restores the original honest
+`MODEL_UNAVAILABLE`-always behavior for an offline/no-network deployment.
 
 **Request** — `multipart/form-data`, field name `image`. Supported types:
 JPEG, PNG, WEBP (validated by decoding the actual bytes, not the declared
@@ -86,20 +119,48 @@ Read an analysis's current lifecycle status and, once available, its
 result (`DamageAnalysis`, `app/ml/schemas.py`) or structured failure. Safe
 to poll — never triggers or re-triggers processing.
 
-**Response `200`**
+**Response `200`, completed (Milestone F4's real default)**
 
 ```json
 {
   "analysis_id": "5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10",
-  "status": "failed",
-  "summary": null,
-  "buildings": [],
-  "model_metadata": null,
-  "failure": { "code": "MODEL_UNAVAILABLE", "message": "..." },
+  "status": "completed",
+  "summary": { "total_buildings": 4, "damaged_buildings": 2, "severely_damaged": 1, "destroyed": 0 },
+  "buildings": [
+    {
+      "building_id": "building_0",
+      "damage_class": "minor",
+      "confidence": 0.41,
+      "bounding_box": { "x_min": 0, "y_min": 0, "x_max": 256, "y_max": 256 },
+      "geometry": { "type": "polygon", "coordinates": [["..."]] },
+      "coordinate_reference_system": "IMAGE",
+      "georeferenced": false
+    }
+  ],
+  "model_metadata": {
+    "model_loaded": true,
+    "model_name": "deterministic-tile-localizer+ViT-B-32",
+    "model_version": "openai",
+    "device": "cpu"
+  },
+  "failure": null,
   "created_at": "2026-01-01T00:00:00Z",
   "updated_at": "2026-01-01T00:00:01Z"
 }
 ```
+
+`confidence` is CLIP's own raw softmax output — genuine model output,
+**not a calibrated probability** (see
+[`apps/api/README.md`](../../apps/api/README.md#confidence-interpretation-f4--read-before-using-confidence)).
+`coordinate_reference_system: "IMAGE"`/`georeferenced: false` — pixel
+coordinates, never geographic ones (see "CRS safety" throughout this
+document and `docs/architecture/intelligence.md`).
+
+**Response `200`, failed** — unchanged shape, `buildings: []`,
+`summary`/`model_metadata: null`, and a structured `failure` (`code`
+one of `MODEL_UNAVAILABLE`/`MODEL_LOAD_FAILURE`/`INVALID_IMAGE`/
+`PREPROCESSING_FAILURE`/`POSTPROCESSING_FAILURE`/`INFERENCE_FAILURE` —
+see `apps/api/README.md`, "Model unavailable / inference failure").
 
 **Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't a
 valid UUID). See
@@ -249,6 +310,188 @@ an empty one, with `reason` explaining why.
 
 **Errors:** `404` (no analysis with that id), `422` (invalid
 `start`/`destination` coordinates, or a missing/invalid `mode`).
+
+### `GET /api/v1/analysis/{analysis_id}/intelligence`
+
+The **analysis-aware** Disaster Intelligence Core entry point (Milestone
+F3) — adapts this analysis's real damage/road-risk output into F2's
+domain model (`app/intelligence/analysis_adapter.py`) and reports
+whether enough evidence exists to build intelligence from it at all. See
+[`docs/architecture/intelligence.md`](../architecture/intelligence.md),
+"Milestone F3," for the full adapter design, the `analysis_id`/
+`disaster_id` relationship, and why they are deliberately not the same
+identifier. Distinct from `GET /api/v1/intelligence/{disaster_id}`
+(F2, below): that path always serves the deterministic demo scenario;
+this path serves real analysis-derived data, keyed by the existing
+`analysis_id`.
+
+**Response `200`, available**
+
+```json
+{
+  "analysis_id": "5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10",
+  "disaster_id": "7c2e4b1a-...",
+  "context_available": true,
+  "context_unavailable_reason": null,
+  "is_simulated": false,
+  "affected_area_count": 3,
+  "hazard_count": 0,
+  "infrastructure_count": 5,
+  "roads_available": true,
+  "roads_unavailable_reason": null,
+  "resources_available": true,
+  "resources_are_demo": true
+}
+```
+
+**Response `200`, unavailable**
+
+```json
+{
+  "analysis_id": "5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10",
+  "disaster_id": "7c2e4b1a-...",
+  "context_available": false,
+  "context_unavailable_reason": "NO_GEOREFERENCE",
+  "is_simulated": false,
+  "affected_area_count": 0,
+  "hazard_count": 0,
+  "infrastructure_count": 0,
+  "roads_available": false,
+  "roads_unavailable_reason": "No road network is loaded.",
+  "resources_available": true,
+  "resources_are_demo": true
+}
+```
+
+`context_unavailable_reason` is one of `ANALYSIS_NOT_COMPLETED`,
+`MODEL_UNAVAILABLE`, `INFERENCE_FAILURE`, `NO_GEOREFERENCE`,
+`INSUFFICIENT_EVIDENCE` — never fabricated when evidence is missing.
+`resources_are_demo` is `true` unconditionally: no real
+resource-ingestion system exists, so matched resources must never be
+mistaken for live telemetry even when the surrounding analysis is real.
+
+**Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't
+a valid UUID).
+
+### `GET /api/v1/analysis/{analysis_id}/intelligence/search-zones`
+
+The same analysis's damage evidence, scored into ranked `SearchZone`s by
+F2's unmodified `search_priority.py` engine — same shape and same
+"never a location claim" discipline as F2's disaster-scoped
+`.../search-zones` endpoint below, just sourced from real damage
+observations instead of the demo scenario. `search_zones` is `[]`
+(not an error) whenever `context_available` is `false`.
+
+**Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't
+a valid UUID).
+
+### `GET /api/v1/analysis/{analysis_id}/intelligence/recommendations`
+
+Ranked `Recommendation`s (F2's unmodified `recommendation.py` engine)
+**plus** resource-capability-match detail for the single top-priority
+search zone — bundled into one response rather than a fourth/fifth
+endpoint, since "what can reach the top zone" is always read alongside
+"what should we do." Each `resource_candidates` entry carries the F2
+`CapabilityMatchResult` (can-perform/is-available/can-reach/route-
+operational, kept as four separate signals) plus a `route_feasibility`
+block:
+
+```json
+{
+  "analysis_id": "5b1f8c2e-2b0a-4e9a-9c1a-3f7e6a2d9b10",
+  "disaster_id": "7c2e4b1a-...",
+  "context_available": true,
+  "context_unavailable_reason": null,
+  "recommendations": [ "... Recommendation objects, each with rationale/supporting_evidence/uncertainty/limitations ..." ],
+  "top_search_zone_id": "9f0a...",
+  "resource_candidates": [
+    {
+      "match": { "resource_id": "...", "eligible": true, "reachability": "reachable", "...": "..." },
+      "route": { "found": true, "total_distance": 210.0, "...": "..." },
+      "route_feasibility": { "status": "computed", "reason": null }
+    }
+  ],
+  "resources_are_demo": true,
+  "roads_available": true,
+  "roads_unavailable_reason": null
+}
+```
+
+`route_feasibility.status` is one of:
+
+- `"computed"` — a real route was actually attempted via the same
+  `RoutingService` engine `POST /api/v1/routing` uses (which may itself
+  report `found=false`) — never invented geometry.
+- `"route_unavailable"` — no road network is loaded, or a location isn't
+  tagged `EPSG:4326`; a candidate is never routed as if untagged/pixel
+  coordinates were geographic.
+- `"not_applicable"` — the candidate failed an earlier capability/
+  availability/reachability gate, or route feasibility is only computed
+  for the single top-ranked candidate (never every candidate, to keep
+  this bounded).
+
+**Errors:** `404` (no analysis with that id), `422` (`analysis_id` isn't
+a valid UUID).
+
+### `GET /api/v1/intelligence/{disaster_id}`
+
+The **Disaster Intelligence Core** (Milestone F2) — a deterministic
+domain model and decision layer distinct from the analysis lifecycle
+above (a `disaster_id` is not an `analysis_id`; see
+[`docs/architecture/intelligence.md`](../architecture/intelligence.md)).
+Returns the `Disaster` record and a count of every recorded intelligence
+entity. As of F2 the only disaster this API can return is the
+deterministic, `is_simulated=true` demo scenario
+(`app/intelligence/demo_scenario.py`) — there is no ingestion endpoint
+yet for a real disaster.
+
+**Response `200`**
+
+```json
+{
+  "disaster": {
+    "id": "...", "type": "flood", "label": "DEMO: Coastal Flooding Scenario",
+    "status": "active", "is_simulated": true, "source": "demo_scenario", "...": "..."
+  },
+  "observation_count": 4, "affected_area_count": 3, "hazard_count": 2,
+  "resource_count": 5, "infrastructure_count": 3, "route_count": 1
+}
+```
+
+**Errors:** `404` (no disaster with that id), `422` (`disaster_id` isn't
+a valid UUID).
+
+### `GET /api/v1/intelligence/{disaster_id}/search-zones`
+
+Ranked `SearchZone`s, scored from the disaster's recorded `AffectedArea`s
+by the deterministic search-priority scorer
+(`app/intelligence/search_priority.py`) — never a claim that a person is
+located there, always "high-priority search zone based on available
+evidence." Every zone discloses which factors were actually scoreable
+(`factors`) and which were not (`missing_factors`), plus `reasons` and
+an `uncertainty` object (`confidence` always `null` — this is a
+heuristic score, not a calibrated probability).
+
+**Errors:** `404` (no disaster with that id).
+
+### `GET /api/v1/intelligence/{disaster_id}/resources`
+
+The disaster's recorded `Resource` registry, unranked (ranking is
+target-specific — see `app/intelligence/capability_matching.py`, used
+internally by the recommendations endpoint below).
+
+**Errors:** `404` (no disaster with that id).
+
+### `GET /api/v1/intelligence/{disaster_id}/recommendations`
+
+Ranked, rule-based `Recommendation`s from the deterministic
+recommendation engine (`app/intelligence/recommendation.py`) — computed
+fresh on every call from the disaster's search zones, hazards,
+infrastructure, and resources, never cached. Every recommendation
+carries a `rationale`, `supporting_evidence`, and `uncertainty` — never
+an unexplained action. No LLM is used for this endpoint.
+
+**Errors:** `404` (no disaster with that id).
 
 Interactive OpenAPI docs are available at `/docs` (Swagger UI) and `/redoc`
 whenever the API is running.

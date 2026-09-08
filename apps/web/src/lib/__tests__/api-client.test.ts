@@ -1,6 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { apiGet, apiPost } from "@/lib/api-client";
+import { apiGet, apiPost, apiUpload } from "@/lib/api-client";
+
+/** A minimal fake standing in for the real `XMLHttpRequest` — `apiUpload`
+ * needs `xhr.upload.onprogress` for real byte-progress events, which
+ * `fetch` cannot provide, so it's the one function in `api-client.ts`
+ * built on XHR instead. jsdom's real `XMLHttpRequest` would attempt an
+ * actual network request here, so it's stubbed the same way `fetch` is
+ * stubbed above, just with a bit more shape to drive manually. */
+class FakeXHR {
+  static instances: FakeXHR[] = [];
+  upload: { onprogress: ((event: ProgressEvent) => void) | null } = { onprogress: null };
+  onerror: (() => void) | null = null;
+  onload: (() => void) | null = null;
+  status = 0;
+  statusText = "";
+  responseText = "";
+  open = vi.fn();
+  send = vi.fn();
+  constructor() {
+    FakeXHR.instances.push(this);
+  }
+}
 
 describe("apiGet/apiPost error handling", () => {
   afterEach(() => {
@@ -76,5 +97,63 @@ describe("apiGet/apiPost error handling", () => {
     expect(init.method).toBe("POST");
     expect(init.body).toBe(JSON.stringify({ mode: "risk_aware" }));
     expect((init.headers as Record<string, string>)["Content-Type"]).toBe("application/json");
+  });
+});
+
+describe("apiUpload", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    FakeXHR.instances = [];
+  });
+
+  it("reports real byte progress via onProgress — never a guessed number", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
+    const onProgress = vi.fn();
+
+    const resultPromise = apiUpload("/api/v1/analysis", new FormData(), onProgress);
+    const xhr = FakeXHR.instances[0]!;
+
+    xhr.upload.onprogress?.({ lengthComputable: true, loaded: 50, total: 200 } as ProgressEvent);
+    expect(onProgress).toHaveBeenCalledWith(50, 200);
+
+    xhr.status = 201;
+    xhr.responseText = JSON.stringify({ analysis_id: "abc" });
+    xhr.onload?.();
+
+    await expect(resultPromise).resolves.toEqual({ ok: true, data: { analysis_id: "abc" } });
+  });
+
+  it("works identically with onProgress omitted (same ApiResult<T> contract as before)", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
+
+    const resultPromise = apiUpload("/api/v1/analysis", new FormData());
+    const xhr = FakeXHR.instances[0]!;
+    xhr.status = 201;
+    xhr.responseText = JSON.stringify({ analysis_id: "abc" });
+    xhr.onload?.();
+
+    await expect(resultPromise).resolves.toEqual({ ok: true, data: { analysis_id: "abc" } });
+  });
+
+  it("prefers the backend's detail message on a non-2xx response, same as apiGet/apiPost", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
+
+    const resultPromise = apiUpload("/api/v1/analysis", new FormData());
+    const xhr = FakeXHR.instances[0]!;
+    xhr.status = 415;
+    xhr.statusText = "Unsupported Media Type";
+    xhr.responseText = JSON.stringify({ detail: "Unsupported image type." });
+    xhr.onload?.();
+
+    await expect(resultPromise).resolves.toEqual({ ok: false, error: "Unsupported image type." });
+  });
+
+  it("surfaces a network failure as an error result, never a throw", async () => {
+    vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
+
+    const resultPromise = apiUpload("/api/v1/analysis", new FormData());
+    FakeXHR.instances[0]!.onerror?.();
+
+    await expect(resultPromise).resolves.toEqual({ ok: false, error: "Network error" });
   });
 });

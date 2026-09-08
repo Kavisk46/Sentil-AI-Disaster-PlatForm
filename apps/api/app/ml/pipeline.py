@@ -20,10 +20,13 @@ from app.ml.model import ModelNotAvailableError, RawDetection
 from app.ml.schemas import ModelStatus
 
 
-class _DamageClassifier(Protocol):
-    """Structural type for Stage 2 — matches `TorchDamageClassifier`
-    without importing it directly, keeping this module free of any
-    PyTorch dependency of its own."""
+class BuildingCropClassifier(Protocol):
+    """Structural type for Stage 2 — matches `TorchDamageClassifier` (and,
+    as of Milestone F4, `ClipZeroShotDamageClassifier`) without importing
+    either directly, keeping this module free of any PyTorch dependency
+    of its own. Public (not `_`-prefixed) so `app/api/deps.py` can type
+    `DamageClassifierDep` against it rather than one concrete
+    implementation."""
 
     def load(self) -> None: ...
     def classify(self, crop: Image.Image) -> RawDetection: ...
@@ -40,7 +43,7 @@ class TwoStageDamageModel:
     genuine result could be produced.
     """
 
-    def __init__(self, localizer: BuildingLocalizer, classifier: _DamageClassifier) -> None:
+    def __init__(self, localizer: BuildingLocalizer, classifier: BuildingCropClassifier) -> None:
         self._localizer = localizer
         self._classifier = classifier
 

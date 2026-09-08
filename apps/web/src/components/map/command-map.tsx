@@ -7,10 +7,17 @@ import type {
   DamageFeatureCollection,
   GeographicCoordinate,
   RouteResult,
+  SearchZone,
 } from "@sentinelai/shared";
 
 import { routeCollection, routeToLineFeature, routeToRiskSegments } from "@/lib/geo";
-import { DAMAGE_CLASS_STYLE, DAMAGE_CLASS_WEIGHT, RISK_LEVEL_STYLE, ROUTE_MODE_STYLE } from "@/lib/risk-colors";
+import {
+  DAMAGE_CLASS_STYLE,
+  DAMAGE_CLASS_WEIGHT,
+  RISK_LEVEL_STYLE,
+  ROUTE_MODE_STYLE,
+  SEARCH_PRIORITY_STYLE,
+} from "@/lib/risk-colors";
 
 /**
  * The default basemap style: MapLibre's own free, no-API-key "demotiles"
@@ -38,6 +45,22 @@ export interface CommandMapProps {
   riskAwareRoute: RouteResult | null;
   routeStart: GeographicCoordinate | null;
   routeDestination: GeographicCoordinate | null;
+  /**
+   * F3 search-priority zones. Rendered only for zones whose
+   * `geometry_crs` is genuinely `"EPSG:4326"` — an IMAGE-space (or any
+   * other non-geographic) zone is silently skipped rather than plotted as
+   * if it were real geography (see `docs/architecture/frontend.md`, "Map
+   * layers"). `null` disables the layer entirely.
+   */
+  searchZones?: SearchZone[] | null;
+  /**
+   * The top search zone's best resource candidate's computed route
+   * (`AnalysisCapabilityMatch.route`), rendered distinctly from the
+   * route-comparison layers above — a recommendation, not a
+   * user-selected comparison. `null`/not found renders nothing, never an
+   * invented path.
+   */
+  recommendedRoute?: RouteResult | null;
   /** Fires when the user clicks the map, for picking route start/destination. */
   onMapClick?: (point: GeographicCoordinate) => void;
   className?: string;
@@ -76,7 +99,28 @@ const SOURCE_IDS = {
   riskAwareRoute: "sentinelai-route-risk-aware",
   riskSegments: "sentinelai-route-risk-segments",
   points: "sentinelai-route-points",
+  searchZones: "sentinelai-search-zones",
+  recommendedRoute: "sentinelai-route-recommended",
 } as const;
+
+/** Only ever plot a zone whose CRS is genuinely tagged geographic — never
+ * treat IMAGE-space (or any other non-WGS84) coordinates as lon/lat, the
+ * same safeguard `affected-area-panel.tsx` and `app.intelligence.analysis_adapter`
+ * already apply. Only point geometries are supported today — F3 never
+ * produces polygon search zones. */
+function searchZonesFeatureCollection(zones: SearchZone[] | null) {
+  const features = (zones ?? []).flatMap((zone) => {
+    if (zone.geometry_crs !== "EPSG:4326" || zone.geometry.type !== "point") return [];
+    return [
+      {
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: zone.geometry.coordinates },
+        properties: { priority_level: zone.priority_level, id: zone.id },
+      },
+    ];
+  });
+  return { type: "FeatureCollection" as const, features };
+}
 
 function pointsFeatureCollection(
   start: GeographicCoordinate | null,
@@ -118,6 +162,8 @@ export function CommandMap({
   riskAwareRoute,
   routeStart,
   routeDestination,
+  searchZones = null,
+  recommendedRoute = null,
   onMapClick,
   className,
   initialView,
@@ -320,6 +366,77 @@ export function CommandMap({
           },
         });
 
+        // F3: search zones — "high-priority search zone based on
+        // available evidence," never a marker claiming a person is
+        // located here (see SearchZone's own doc comment). A pulsing
+        // halo under a solid core keeps critical zones visually
+        // distinct without relying on color alone (WCAG 1.4.1) — the
+        // priority_level is also available via the sr-only summary
+        // below and every intelligence-panel.tsx badge.
+        map!.addSource(SOURCE_IDS.searchZones, { type: "geojson", data: EMPTY_FEATURE_COLLECTION });
+        map!.addLayer({
+          id: `${SOURCE_IDS.searchZones}-halo`,
+          type: "circle",
+          source: SOURCE_IDS.searchZones,
+          paint: {
+            "circle-radius": 16,
+            "circle-color": [
+              "match",
+              ["get", "priority_level"],
+              "critical",
+              SEARCH_PRIORITY_STYLE.critical.hex,
+              "high",
+              SEARCH_PRIORITY_STYLE.high.hex,
+              "moderate",
+              SEARCH_PRIORITY_STYLE.moderate.hex,
+              SEARCH_PRIORITY_STYLE.low.hex,
+            ],
+            "circle-opacity": 0.2,
+          },
+        });
+        map!.addLayer({
+          id: SOURCE_IDS.searchZones,
+          type: "circle",
+          source: SOURCE_IDS.searchZones,
+          paint: {
+            "circle-radius": 7,
+            "circle-color": [
+              "match",
+              ["get", "priority_level"],
+              "critical",
+              SEARCH_PRIORITY_STYLE.critical.hex,
+              "high",
+              SEARCH_PRIORITY_STYLE.high.hex,
+              "moderate",
+              SEARCH_PRIORITY_STYLE.moderate.hex,
+              SEARCH_PRIORITY_STYLE.low.hex,
+            ],
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#0f172a",
+          },
+        });
+
+        // F3: the top-priority zone's best resource candidate's
+        // computed route — a recommendation layer, styled distinctly
+        // (magenta, wide dash) from the user-driven route-comparison
+        // layers above so the two are never visually confused.
+        map!.addSource(SOURCE_IDS.recommendedRoute, {
+          type: "geojson",
+          data: EMPTY_FEATURE_COLLECTION,
+        });
+        map!.addLayer({
+          id: SOURCE_IDS.recommendedRoute,
+          type: "line",
+          source: SOURCE_IDS.recommendedRoute,
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#d946ef",
+            "line-width": 3.5,
+            "line-dasharray": [3, 1.5],
+            "line-opacity": 0.9,
+          },
+        });
+
         setIsReady(true);
       });
 
@@ -386,6 +503,23 @@ export function CommandMap({
     source?.setData(pointsFeatureCollection(routeStart, routeDestination));
   }, [routeStart, routeDestination, isReady]);
 
+  React.useEffect(() => {
+    if (!isReady) return;
+    const source = mapRef.current?.getSource(SOURCE_IDS.searchZones) as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    source?.setData(searchZonesFeatureCollection(searchZones));
+  }, [searchZones, isReady]);
+
+  React.useEffect(() => {
+    if (!isReady) return;
+    const feature = recommendedRoute ? routeToLineFeature(recommendedRoute) : null;
+    const source = mapRef.current?.getSource(SOURCE_IDS.recommendedRoute) as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    source?.setData(routeCollection(feature ? [feature] : []));
+  }, [recommendedRoute, isReady]);
+
   // Fit the viewport to whatever data is actually available, once per
   // dataset change — never a fabricated/default "interesting" location.
   React.useEffect(() => {
@@ -397,8 +531,13 @@ export function CommandMap({
       if (feature.geometry.type === "Point") bounds.push(feature.geometry.coordinates);
       else if (feature.geometry.type === "Polygon") bounds.push(...feature.geometry.coordinates[0]!);
     }
-    for (const route of [distanceOnlyRoute, riskAwareRoute]) {
+    for (const route of [distanceOnlyRoute, riskAwareRoute, recommendedRoute]) {
       if (route?.found) bounds.push(...route.route_geometry);
+    }
+    for (const zone of searchZones ?? []) {
+      if (zone.geometry_crs === "EPSG:4326" && zone.geometry.type === "point") {
+        bounds.push(zone.geometry.coordinates);
+      }
     }
 
     if (bounds.length === 0) return;
@@ -414,7 +553,7 @@ export function CommandMap({
       maxZoom: 16,
       duration: prefersReducedMotion ? 0 : 800,
     });
-  }, [damage, distanceOnlyRoute, riskAwareRoute, isReady]);
+  }, [damage, distanceOnlyRoute, riskAwareRoute, recommendedRoute, searchZones, isReady]);
 
   return (
     <div className={className} aria-hidden={decorative || undefined}>
@@ -440,7 +579,11 @@ export function CommandMap({
             ? `${damage.features.length} damage feature(s) shown.`
             : "No damage data loaded."}{" "}
           {riskAwareRoute?.found ? "A risk-aware route is shown." : ""}{" "}
-          {distanceOnlyRoute?.found ? "A distance-only baseline route is shown." : ""}
+          {distanceOnlyRoute?.found ? "A distance-only baseline route is shown." : ""}{" "}
+          {searchZones && searchZones.length > 0
+            ? `${searchZones.length} search priority zone(s) shown.`
+            : ""}{" "}
+          {recommendedRoute?.found ? "A recommended route to the top-priority zone is shown." : ""}
         </p>
       )}
     </div>

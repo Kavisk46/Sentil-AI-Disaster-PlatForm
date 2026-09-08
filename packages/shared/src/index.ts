@@ -39,6 +39,8 @@ export type {
 
 export type { RoadRiskResponse } from "./types/road-risk";
 
+export type { ModelLifecycleState, ModelStatusResponse } from "./types/model";
+
 export type {
   RoutingMode,
   AccessibilitySummary,
@@ -55,3 +57,57 @@ export type {
   RouteQuery,
   IncidentSummaryRequest,
 } from "./types/incident";
+
+export type {
+  CoordinateReferenceSystemCode,
+  PointGeometry,
+  PolygonGeometry,
+  Geometry,
+  UncertaintyLevel,
+  Uncertainty,
+  EvidenceSourceType,
+  Evidence,
+  DisasterType,
+  DisasterStatus,
+  Disaster,
+  ObservationType,
+  Observation,
+  AffectedArea,
+  SearchPriorityLevel,
+  SearchZoneFactor,
+  SearchZone,
+  HazardType,
+  HazardSeverity,
+  Hazard,
+  ResourceType,
+  ResourceCapability,
+  ResourceAvailability,
+  OperationalConstraint,
+  Resource,
+  TerrainCapability,
+  RescueTeam,
+  InfrastructureType,
+  InfrastructureStatus,
+  Infrastructure,
+  Route,
+  HazardPredictionStatus,
+  HazardPrediction,
+  RecommendationAction,
+  RecommendationPriority,
+  Recommendation,
+  ReachabilityStatus,
+  CapabilityMatchResult,
+  DisasterSummaryResponse,
+  SearchZoneListResponse,
+  ResourceListResponse,
+  RecommendationListResponse,
+} from "./types/intelligence";
+
+export type {
+  RouteFeasibilityStatusCode,
+  RouteFeasibilityStatus,
+  AnalysisCapabilityMatch,
+  AnalysisIntelligenceContextResponse,
+  AnalysisSearchZonesResponse,
+  AnalysisRecommendationsResponse,
+} from "./types/analysis-intelligence";

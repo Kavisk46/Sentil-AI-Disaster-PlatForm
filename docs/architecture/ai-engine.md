@@ -65,15 +65,28 @@ learning) are tracked in
 
 The damage-detection *architecture and its first concrete adapters* exist
 in `apps/api/app/ml/` — a two-stage design (building localization, then
-damage classification, composed via `TwoStageDamageModel`). **No model has
-been trained.** Stage 1 (building localization) has no implementation
-beyond its interface — no off-the-shelf pretrained detector has a
-"building" class to start from. Stage 2 (damage classification,
-`TorchDamageClassifier`, a ResNet18 baseline) is real, working inference
-code with no fine-tuned checkpoint loaded. Both fail loudly rather than
-fabricating a result; see
-[`apps/api/README.md`](../../apps/api/README.md#ml-architecture-milestones-3a-and-3c)
-for the full architecture, the model-selection rationale, and why.
+damage classification, composed via `TwoStageDamageModel`). Milestones
+3A/3C built this architecture with no trained model behind it: Stage 1
+(building localization) had no implementation beyond its interface (no
+off-the-shelf pretrained detector has a "building" class), and Stage 2
+(`TorchDamageClassifier`, a ResNet18 baseline) was real, working
+inference code with no fine-tuned checkpoint loaded. That exact
+architecture is preserved unmodified and still selectable
+(`Settings.MODEL_PROVIDER="legacy_resnet"`), still untrained.
+
+**Milestone F4 ("Real AI Inference & Model Serving") makes real,
+CPU-only inference the default** without requiring the training run
+Milestone 3C always assumed: Stage 1 becomes deterministic image tiling
+(`TileRegionLocalizer` — not a model, since none legitimately applies —
+see `apps/api/README.md`, "Why Stage 1 is deterministic tiling, not a
+'real' localizer"), and Stage 2 becomes zero-shot classification via a
+real, genuinely pretrained CLIP checkpoint (`ClipZeroShotDamageClassifier`,
+`open_clip`'s `ViT-B-32`/`openai`) — a general-purpose vision-language
+model, explicitly **not** trained or fine-tuned on xBD. Both stages fail
+loudly (never fabricating a result) when genuinely unavailable; see
+[`apps/api/README.md`](../../apps/api/README.md#milestone-f4--real-inference)
+for the full architecture, the model-selection rationale, confidence
+interpretation, and known limitations.
 
 The dataset pipeline that a future training run will consume — parsing and
 validating the [xBD](https://arxiv.org/abs/1911.09296) dataset, and

@@ -29,3 +29,19 @@ if (typeof window !== "undefined" && !window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+// jsdom also has no `ResizeObserver` (no real layout engine to observe) —
+// `command-map.tsx` uses one to keep the WebGL canvas sized. Most tests
+// never hit this (they stub out `command-map-loader` entirely), but any
+// test that lets the real `CommandMap` mount (e.g.
+// `landing-hero-map.test.tsx`) would otherwise throw a
+// `ReferenceError: ResizeObserver is not defined` during mount, crashing
+// the whole render with no useful assertion possible. This no-op stub is
+// sufficient since no test asserts on actual resize behavior.
+if (typeof window !== "undefined" && !window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}

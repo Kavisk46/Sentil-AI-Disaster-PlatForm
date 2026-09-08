@@ -8,12 +8,15 @@ import type { RoadRiskPanelProps } from "@/components/command-center/road-risk-p
 import { RoadRiskPanel } from "@/components/command-center/road-risk-panel";
 import type { RouteComparisonPanelProps } from "@/components/command-center/route-comparison-panel";
 import { RouteComparisonPanel } from "@/components/command-center/route-comparison-panel";
+import type { IntelligencePanelProps } from "@/components/command-center/intelligence-panel";
+import { IntelligencePanel } from "@/components/command-center/intelligence-panel";
 
 export interface ResultsPanelGridProps {
   damageStats: Omit<DamageStatsPanelProps, "className">;
   roadRisk: Omit<RoadRiskPanelProps, "className">;
   affectedArea: Omit<AffectedAreaPanelProps, "className">;
   routeComparison: Omit<RouteComparisonPanelProps, "className">;
+  intelligence: Omit<IntelligencePanelProps, "className">;
   briefing: Omit<BriefingPanelProps, "className">;
 }
 
@@ -26,6 +29,11 @@ export interface ResultsPanelGridProps {
  * Each panel auto-populates on its own as soon as its own data becomes
  * available (no wizard, no click required to "advance") — see
  * `docs/architecture/frontend.md`, "Data flow".
+ *
+ * `intelligence` (F3) is the sixth, additive section — Search Priority /
+ * Resource Capability / Recommended Action / Limitations, sourced from
+ * either the F2 demo scenario or real F3 analysis-derived intelligence
+ * (see `command-center.tsx`, which normalizes both into the same props).
  *
  * Renders a Fragment, not a wrapping `<div>`: the panels need to be true
  * DOM siblings of `analysis-workspace.tsx`'s block (both are direct
@@ -41,6 +49,7 @@ export function ResultsPanelGrid({
   roadRisk,
   affectedArea,
   routeComparison,
+  intelligence,
   briefing,
 }: ResultsPanelGridProps) {
   return (
@@ -50,6 +59,11 @@ export function ResultsPanelGrid({
       <AffectedAreaPanel {...affectedArea} className="order-6 lg:order-4" />
       <RouteComparisonPanel {...routeComparison} className="order-2 lg:order-5" />
       <BriefingPanel {...briefing} className="order-3 lg:order-6" />
+      {/* F3: appended last, desktop and mobile — an additive capability
+          layered on top of the existing five sections above, not a
+          replacement for any of them (see the milestone's non-goal "do
+          not redesign the entire frontend"). */}
+      <IntelligencePanel {...intelligence} className="order-4 lg:order-7" />
     </>
   );
 }

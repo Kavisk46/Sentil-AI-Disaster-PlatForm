@@ -73,6 +73,10 @@ class AnalysisRecord:
     buildings: tuple[BuildingDamage, ...] | None = None
     model_metadata: ModelStatus | None = None
     failure: AnalysisFailure | None = None
+    # Milestone F5: how many times a worker has attempted to process this
+    # analysis — see `increment_attempt_count` below. Always `0` for a
+    # record that has never been picked up by a worker yet.
+    attempt_count: int = 0
 
 
 class AnalysisRepository(Protocol):
@@ -105,6 +109,12 @@ class AnalysisRepository(Protocol):
 
         Raises `AnalysisNotFoundError` if `analysis_id` is unknown.
         """
+        ...
+
+    def increment_attempt_count(self, analysis_id: UUID) -> int:
+        """Milestone F5: record one more worker attempt at processing
+        `analysis_id`; returns the new count. Raises
+        `AnalysisNotFoundError` if `analysis_id` is unknown."""
         ...
 
 
@@ -153,6 +163,17 @@ class InMemoryAnalysisRepository:
 
     def save_failure(self, analysis_id: UUID, failure: AnalysisFailure) -> AnalysisRecord:
         return self._replace(analysis_id, status=AnalysisStatus.FAILED, failure=failure)
+
+    def increment_attempt_count(self, analysis_id: UUID) -> int:
+        with self._lock:
+            existing = self._records.get(analysis_id)
+            if existing is None:
+                raise AnalysisNotFoundError(analysis_id)
+            updated = replace(
+                existing, attempt_count=existing.attempt_count + 1, updated_at=datetime.now(UTC)
+            )
+            self._records[analysis_id] = updated
+            return updated.attempt_count
 
     def _replace(self, analysis_id: UUID, **changes: object) -> AnalysisRecord:
         with self._lock:

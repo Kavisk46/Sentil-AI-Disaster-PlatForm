@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { RouteResult } from "@sentinelai/shared";
+import type { DamageFeatureCollection, RouteResult } from "@sentinelai/shared";
 
 import {
+  boundingBoxAreaKm2,
+  computeFeatureBounds,
   computeRouteComparison,
   formatDistanceMeters,
   formatPercent,
@@ -147,6 +149,75 @@ describe("routeToRiskSegments", () => {
       edge_sequence: [],
     });
     expect(routeToRiskSegments(route)).toHaveLength(0);
+  });
+});
+
+function makeCollection(positions: [number, number][]): DamageFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    coordinate_reference_system: "EPSG:4326",
+    features: positions.map(([lon, lat], index) => ({
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [lon, lat] },
+      properties: {
+        building_id: `b${index}`,
+        damage_class: "minor",
+        confidence: 0.5,
+        priority: "low",
+        georeferenced: true,
+      },
+    })),
+  };
+}
+
+describe("computeFeatureBounds", () => {
+  it("returns null for an empty collection — never a fabricated default location", () => {
+    expect(computeFeatureBounds(makeCollection([]))).toBeNull();
+  });
+
+  it("computes the real bounding box of Point features", () => {
+    const bounds = computeFeatureBounds(makeCollection([[-1, -2], [3, 4], [0, 0]]));
+    expect(bounds).toEqual({ west: -1, south: -2, east: 3, north: 4 });
+  });
+
+  it("includes Polygon ring vertices, not just Point geometry", () => {
+    const collection: DamageFeatureCollection = {
+      type: "FeatureCollection",
+      coordinate_reference_system: "EPSG:4326",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [10, 10],
+                [12, 10],
+                [12, 12],
+                [10, 12],
+                [10, 10],
+              ],
+            ],
+          },
+          properties: { building_id: "b0", damage_class: "major", confidence: 0.5, priority: "high", georeferenced: true },
+        },
+      ],
+    };
+    expect(computeFeatureBounds(collection)).toEqual({ west: 10, south: 10, east: 12, north: 12 });
+  });
+});
+
+describe("boundingBoxAreaKm2", () => {
+  it("is zero for a degenerate (point) box", () => {
+    expect(boundingBoxAreaKm2({ west: 5, south: 5, east: 5, north: 5 })).toBe(0);
+  });
+
+  it("computes a positive, real area for a real box", () => {
+    const area = boundingBoxAreaKm2({ west: -1, south: -1, east: 1, north: 1 });
+    expect(area).toBeGreaterThan(0);
+    // ~2 degrees square near the equator is roughly 49,000 km² —
+    // deterministic geometry, not a guess.
+    expect(area).toBeCloseTo(49450, -3);
   });
 });
 

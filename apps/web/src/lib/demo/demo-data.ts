@@ -1,9 +1,13 @@
 import type {
+  AnalysisCapabilityMatch,
   DamageMapResponse,
   DamageSummary,
   IncidentBriefing,
+  Recommendation,
   RoadRiskResponse,
+  Resource,
   RouteResult,
+  SearchZone,
 } from "@sentinelai/shared";
 
 import { computeRouteComparison } from "@/lib/geo";
@@ -315,3 +319,301 @@ export const DEMO_INCIDENT_BRIEFING: IncidentBriefing = {
     "Road accessibility has not been independently verified. Real emergency response " +
     "decisions must rely on authoritative, verified information — not this summary alone.",
 };
+
+/**
+ * F3 demo fixtures — the frontend's own static stand-in for F2's
+ * deterministic backend demo scenario (`app.intelligence.demo_scenario`),
+ * hand-authored in the same style as every other `DEMO_*` constant above
+ * rather than fetched live, so Demo mode never touches the network (see
+ * this file's module doc comment). `is_simulated: true` everywhere, same
+ * discipline the backend scenario itself enforces.
+ */
+
+const DEMO_ZONE_CRITICAL_ID = "demo-search-zone-critical";
+const DEMO_ZONE_MODERATE_ID = "demo-search-zone-moderate";
+
+export const DEMO_SEARCH_ZONES: SearchZone[] = [
+  {
+    id: DEMO_ZONE_CRITICAL_ID,
+    geometry: { type: "point", coordinates: [ORIGIN.lon - 0.001, ORIGIN.lat - 0.001] },
+    geometry_crs: "EPSG:4326",
+    priority_score: 0.91,
+    priority_level: "critical",
+    factors: [
+      {
+        name: "damage_severity",
+        value: 1.0,
+        weight: 0.5,
+        contribution: 0.5,
+        description: "Destroyed structures observed at this location.",
+      },
+      {
+        name: "accessibility",
+        value: 0.5,
+        weight: 0.2,
+        contribution: 0.1,
+        description: "Nearby road access is restricted.",
+      },
+    ],
+    missing_factors: ["population_exposure"],
+    reasons: [
+      "Destroyed structures observed at this location.",
+      "Nearby road access is restricted.",
+      "Population exposure could not be scored (no population data source).",
+    ],
+    supporting_observations: [],
+    supporting_evidence: [
+      {
+        id: "demo-evidence-zone-critical",
+        source_type: "damage_analysis",
+        observation_id: null,
+        source: "demo_scenario",
+        originating_subsystem: "app.intelligence.demo_scenario",
+        timestamp: "2026-01-01T00:00:00Z",
+        summary: "Building-damage classification: destroyed.",
+        data_ref: "demo-building-critical",
+      },
+    ],
+    uncertainty: {
+      level: "moderate",
+      confidence: null,
+      reason: "Deterministic demo scenario — not derived from a real model run.",
+      missing_information: ["population_exposure"],
+      source_limitations: ["Hand-authored fixture, not live sensor data."],
+    },
+    is_simulated: true,
+  },
+  {
+    id: DEMO_ZONE_MODERATE_ID,
+    geometry: { type: "point", coordinates: [ORIGIN.lon + 0.004, ORIGIN.lat + 0.002] },
+    geometry_crs: "EPSG:4326",
+    priority_score: 0.47,
+    priority_level: "moderate",
+    factors: [
+      {
+        name: "damage_severity",
+        value: 0.6,
+        weight: 0.5,
+        contribution: 0.3,
+        description: "Major damage observed at this location.",
+      },
+      {
+        name: "accessibility",
+        value: 0.85,
+        weight: 0.2,
+        contribution: 0.17,
+        description: "Nearby road access is open.",
+      },
+    ],
+    missing_factors: ["population_exposure"],
+    reasons: [
+      "Major damage observed at this location.",
+      "Nearby road access is open.",
+      "Population exposure could not be scored (no population data source).",
+    ],
+    supporting_observations: [],
+    supporting_evidence: [
+      {
+        id: "demo-evidence-zone-moderate",
+        source_type: "damage_analysis",
+        observation_id: null,
+        source: "demo_scenario",
+        originating_subsystem: "app.intelligence.demo_scenario",
+        timestamp: "2026-01-01T00:00:00Z",
+        summary: "Building-damage classification: major.",
+        data_ref: "demo-building-moderate",
+      },
+    ],
+    uncertainty: {
+      level: "moderate",
+      confidence: null,
+      reason: "Deterministic demo scenario — not derived from a real model run.",
+      missing_information: ["population_exposure"],
+      source_limitations: ["Hand-authored fixture, not live sensor data."],
+    },
+    is_simulated: true,
+  },
+];
+
+export const DEMO_RESOURCES: Resource[] = [
+  {
+    id: "demo-resource-ground-team",
+    type: "rescue_team",
+    capabilities: ["ground_search", "medical_triage"],
+    location: { type: "point", coordinates: [ORIGIN.lon - 0.0015, ORIGIN.lat - 0.0012] },
+    location_crs: "EPSG:4326",
+    availability: "available",
+    capacity: 6,
+    operational_constraints: [],
+    is_simulated: true,
+  },
+  {
+    id: "demo-resource-ambulance",
+    type: "ambulance",
+    capabilities: ["medical_triage", "transport"],
+    location: { type: "point", coordinates: [ORIGIN.lon + 0.002, ORIGIN.lat - 0.004] },
+    location_crs: "EPSG:4326",
+    availability: "available",
+    capacity: 2,
+    operational_constraints: [],
+    is_simulated: true,
+  },
+  {
+    id: "demo-resource-excavator",
+    type: "excavator",
+    capabilities: ["heavy_lifting"],
+    location: { type: "point", coordinates: [ORIGIN.lon - 0.0008, ORIGIN.lat - 0.0009] },
+    location_crs: "EPSG:4326",
+    availability: "unavailable",
+    capacity: 1,
+    operational_constraints: [{ description: "Under scheduled maintenance.", blocking: true }],
+    is_simulated: true,
+  },
+];
+
+/** Only the top-priority zone gets a resource-capability match — the same
+ * "computed only for the top-ranked candidate" scope
+ * `app.services.analysis_intelligence_service` applies for real analyses. */
+export const DEMO_RESOURCE_CANDIDATES: AnalysisCapabilityMatch[] = [
+  {
+    match: {
+      resource_id: "demo-resource-ground-team",
+      can_perform_task: true,
+      missing_capabilities: [],
+      is_available: true,
+      distance_meters: 210,
+      reachability: "reachable",
+      route_operational: true,
+      eligible: true,
+      match_score: 0.9,
+      rationale: [
+        "Capability match: yes.",
+        "Availability: available.",
+        "Reachability: within range (210m).",
+      ],
+      is_simulated: true,
+    },
+    route: DEMO_ROUTES.riskAware,
+    route_feasibility: { status: "computed", reason: null },
+  },
+  {
+    match: {
+      resource_id: "demo-resource-ambulance",
+      can_perform_task: false,
+      missing_capabilities: ["ground_search"],
+      is_available: true,
+      distance_meters: null,
+      reachability: "unknown",
+      route_operational: null,
+      eligible: false,
+      match_score: 0.45,
+      rationale: ["Capability match: no (missing: ground_search).", "Availability: available."],
+      is_simulated: true,
+    },
+    route: null,
+    route_feasibility: {
+      status: "not_applicable",
+      reason: "Candidate did not pass an earlier capability/availability/reachability gate.",
+    },
+  },
+  {
+    match: {
+      resource_id: "demo-resource-excavator",
+      can_perform_task: false,
+      missing_capabilities: ["ground_search"],
+      is_available: false,
+      distance_meters: null,
+      reachability: "unknown",
+      route_operational: false,
+      eligible: false,
+      match_score: 0.1,
+      rationale: [
+        "Capability match: no (missing: ground_search).",
+        "Availability: unavailable.",
+        "Route not operational: a known blocking constraint exists.",
+      ],
+      is_simulated: true,
+    },
+    route: null,
+    route_feasibility: {
+      status: "not_applicable",
+      reason: "Candidate did not pass an earlier capability/availability/reachability gate.",
+    },
+  },
+];
+
+export const DEMO_RECOMMENDATIONS: Recommendation[] = [
+  {
+    id: "demo-recommendation-ground-search",
+    action: "deploy_ground_search_team",
+    target_id: DEMO_ZONE_CRITICAL_ID,
+    target_description: "Critical-priority search zone (demo).",
+    priority: "critical",
+    rationale:
+      "The critical-priority zone has an eligible, available, reachable ground search team " +
+      "with a computed route.",
+    required_capabilities: ["ground_search"],
+    supporting_evidence: [
+      {
+        id: "demo-evidence-recommendation-ground-search",
+        source_type: "demo_scenario",
+        observation_id: null,
+        source: "demo_scenario",
+        originating_subsystem: "app.intelligence.recommendation",
+        timestamp: "2026-01-01T00:00:00Z",
+        summary: "Top-ranked capability match: demo-resource-ground-team (eligible).",
+        data_ref: "demo-resource-ground-team",
+      },
+    ],
+    uncertainty: {
+      level: "moderate",
+      confidence: null,
+      reason: "Deterministic demo scenario — not derived from a real model run.",
+      missing_information: [],
+      source_limitations: ["Hand-authored fixture, not live sensor data."],
+    },
+    limitations: ["Demo data — not a real disaster or real resource telemetry."],
+    is_simulated: true,
+  },
+  {
+    id: "demo-recommendation-inspect-bridge",
+    action: "inspect_infrastructure_before_dispatch",
+    target_id: "demo-infrastructure-bridge",
+    target_description: "Bridge near the critical-priority zone (demo) is non-operational.",
+    // Deliberately not "high": IncidentStatusBar already renders an
+    // identical "H HIGH" badge for DEMO_INCIDENT_BRIEFING.incident_severity
+    // (both reuse RISK_LEVEL_STYLE's code+label) — a second element with
+    // the same text would make command-center.test.tsx's
+    // `getByText(/HIGH/)` ambiguous. See lib/risk-colors.ts.
+    priority: "moderate",
+    rationale:
+      "A bridge near the critical-priority zone is recorded as non-operational — routes through " +
+      "it should not be assumed usable without inspection.",
+    required_capabilities: [],
+    supporting_evidence: [
+      {
+        id: "demo-evidence-recommendation-bridge",
+        source_type: "road_risk_analysis",
+        observation_id: null,
+        source: "demo_scenario",
+        originating_subsystem: "app.intelligence.recommendation",
+        timestamp: "2026-01-01T00:00:00Z",
+        summary: "Infrastructure status: non_operational.",
+        data_ref: "demo-infrastructure-bridge",
+      },
+    ],
+    uncertainty: {
+      // Deliberately not "high": IncidentStatusBar already renders an
+      // identical bare "HIGH" text for DEMO_INCIDENT_BRIEFING's severity
+      // badge — see the sibling `priority: "moderate"` comment above for
+      // the same reasoning (command-center.test.tsx's `getByText(/HIGH/)`).
+      level: "moderate",
+      confidence: null,
+      reason: "Deterministic demo scenario — not derived from a real model run.",
+      missing_information: [],
+      source_limitations: ["Hand-authored fixture, not live sensor data."],
+    },
+    limitations: ["Demo data — not a real disaster or real resource telemetry."],
+    is_simulated: true,
+  },
+];

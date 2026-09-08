@@ -54,6 +54,16 @@ class ModelNotAvailableError(RuntimeError):
     """Raised by `predict()` when no trained model is configured/loaded."""
 
 
+class ModelLoadError(RuntimeError):
+    """Raised by `load()` when a real load attempt was actually made but
+    genuinely failed (e.g. a network error downloading a pretrained
+    checkpoint, or a corrupt/incompatible checkpoint file) — distinct from
+    `ModelNotAvailableError`, which means "no model is configured, no load
+    was ever attempted." Milestone F4 (see `app/ml/clip_classifier.py`,
+    `app/ml/tile_localizer.py`); maps to `AnalysisErrorCode.MODEL_LOAD_FAILURE`
+    (`app/services/analysis_processing_service.py`)."""
+
+
 class DamageModel(Protocol):
     def load(self) -> None:
         """Load model weights. Safe to call repeatedly; a no-op once loaded."""

@@ -6,6 +6,7 @@ import pytest
 from PIL import Image
 
 from app.ml.preprocessing import (
+    ImageDimensionsExceededError,
     ImagePreprocessor,
     InvalidImageError,
     PreprocessConfig,
@@ -29,6 +30,38 @@ def test_load_image_decodes_valid_bytes() -> None:
 def test_load_image_rejects_garbage_bytes() -> None:
     with pytest.raises(InvalidImageError):
         load_image(b"not an image")
+
+
+def test_load_image_with_no_max_dimension_accepts_any_size() -> None:
+    """Default (no `max_dimension` passed) preserves prior behavior —
+    most existing callers/tests never pass one."""
+    image = load_image(_image_bytes("RGB", (50, 50)))
+
+    assert image.size == (50, 50)
+
+
+def test_load_image_accepts_an_image_within_the_max_dimension() -> None:
+    image = load_image(_image_bytes("RGB", (100, 100)), max_dimension=200)
+
+    assert image.size == (100, 100)
+
+
+def test_load_image_rejects_an_image_exceeding_the_max_dimension() -> None:
+    with pytest.raises(ImageDimensionsExceededError, match="exceed the maximum allowed"):
+        load_image(_image_bytes("RGB", (300, 100)), max_dimension=200)
+
+
+def test_load_image_rejects_when_only_height_exceeds_the_max_dimension() -> None:
+    with pytest.raises(ImageDimensionsExceededError):
+        load_image(_image_bytes("RGB", (100, 300)), max_dimension=200)
+
+
+def test_image_dimensions_exceeded_error_is_a_value_error_distinct_from_invalid_image() -> None:
+    """A pathologically large but otherwise well-formed image is a
+    different failure mode from "not a real image at all" — see
+    AnalysisErrorCode.PREPROCESSING_FAILURE vs .INVALID_IMAGE."""
+    assert issubclass(ImageDimensionsExceededError, ValueError)
+    assert not issubclass(ImageDimensionsExceededError, InvalidImageError)
 
 
 def test_to_rgb_converts_rgba_to_rgb() -> None:

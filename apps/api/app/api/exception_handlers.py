@@ -14,6 +14,7 @@ from app.services.exceptions import (
     InvalidImageContentError,
     UnsupportedImageTypeError,
 )
+from app.services.intelligence_repository import DisasterNotFoundError
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -48,5 +49,12 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
+            content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(DisasterNotFoundError)
+    async def _handle_disaster_not_found(_: Request, exc: DisasterNotFoundError) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
             content={"detail": str(exc)},
         )

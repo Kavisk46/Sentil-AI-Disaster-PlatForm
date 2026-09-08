@@ -33,7 +33,20 @@ below. **No shortest-path routing existed before this milestone, and
 route optimization/live navigation still don't** — see that section's
 own "Do not implement." **No model has been trained**, so every analysis
 today still ends up `failed` with `MODEL_UNAVAILABLE` — see "Analysis
-lifecycle," below. Still no database or authentication.
+lifecycle," below. Milestone F2 adds the **Disaster Intelligence
+Core**: a typed domain model (`Disaster`/`Observation`/`AffectedArea`/
+`SearchZone`/`Hazard`/`Resource`/`RescueTeam`/`Infrastructure`/`Route`/
+`HazardPrediction`/`Recommendation`/`Evidence`/`Uncertainty`) plus a
+**deterministic, rule-based** search-priority scorer, capability
+matcher, and recommendation engine — no ML model, no LLM. See
+[`docs/architecture/intelligence.md`](../../docs/architecture/intelligence.md)
+for the full pipeline and "Disaster Intelligence Core," below, for the
+endpoints. Milestone F3 connects that Core to real analysis output —
+`GET /api/v1/analysis/{analysis_id}/intelligence[...]` adapts a
+completed analysis's own damage/road-risk results into the same domain
+model and reuses F2's engines unmodified, with real route-feasibility
+computed via the existing routing engine — see "Analysis-Aware
+Intelligence (Milestone F3)," below. Still no database or authentication.
 
 See [`docs/architecture/backend.md`](../../docs/architecture/backend.md)
 for the architecture and layering conventions, and
@@ -67,6 +80,10 @@ uvicorn app.main:app --reload
 | `GET /api/v1/roads/status` | Whether a road network is loaded, and its size/bounds (see below) |
 | `GET /api/v1/analysis/{analysis_id}/road-risk` | Read the risk-aware road representation for an analysis (see below) |
 | `POST /api/v1/routing` | Compute a `distance_only` or `risk_aware` route (see below) |
+| `GET /api/v1/intelligence/{disaster_id}` | Disaster Intelligence Core: disaster record + entity counts (see below) |
+| `GET /api/v1/intelligence/{disaster_id}/search-zones` | Ranked search zones, scored from recorded affected areas (see below) |
+| `GET /api/v1/intelligence/{disaster_id}/resources` | The recorded resource registry for a disaster (see below) |
+| `GET /api/v1/intelligence/{disaster_id}/recommendations` | Ranked, rule-based response recommendations (see below) |
 
 ### `POST /api/v1/analysis` — upload + dispatch
 
@@ -378,6 +395,70 @@ near the requested coordinates, no georeferenced damage data for
 **Errors:** `404` (no analysis with that id), `422` (invalid
 `start`/`destination` coordinates, or a missing/invalid `mode`).
 
+### `GET /api/v1/intelligence/{disaster_id}[/search-zones|/resources|/recommendations]` — Disaster Intelligence Core
+
+Four read-only endpoints over a **different identifier** than everything
+above: `disaster_id`, not `analysis_id` — a `Disaster` (Milestone F2)
+spans observations, hazards, resources, and infrastructure, not one
+uploaded image. See "Disaster Intelligence Core (Milestone F2)," below,
+and [`docs/architecture/intelligence.md`](../../docs/architecture/intelligence.md)
+for the full domain model and algorithms.
+
+```bash
+curl http://localhost:8000/api/v1/intelligence/<disaster_id>/recommendations
+```
+
+**Response `200` (`/recommendations`)**
+
+```json
+{
+  "disaster_id": "...",
+  "recommendations": [
+    {
+      "id": "...", "action": "deploy_ground_search_team", "target_id": "...",
+      "priority": "critical", "rationale": "...",
+      "supporting_evidence": ["... Evidence objects ..."],
+      "uncertainty": { "level": "low", "confidence": null, "reason": "..." },
+      "limitations": [], "is_simulated": true
+    }
+  ]
+}
+```
+
+There is no ingestion endpoint yet — the only `disaster_id` this API can
+currently resolve is the deterministic demo scenario's id
+(`app/intelligence/demo_scenario.py::build_demo_scenario().disaster.id`,
+always the same value across process restarts — see "Demo scenario,"
+below). **Errors:** `404` (no disaster with that id), `422`
+(`disaster_id` isn't a valid UUID).
+
+### `GET /api/v1/analysis/{analysis_id}/intelligence[/search-zones|/recommendations]` — Analysis-Aware Intelligence
+
+Three read-only endpoints (Milestone F3) that adapt *this* `analysis_id`'s
+real damage/road-risk output into the same F2 domain model above — see
+"Analysis-Aware Intelligence (Milestone F3)," below, and
+[`docs/architecture/intelligence.md`](../../docs/architecture/intelligence.md)
+for the full adapter design and the `analysis_id`/`disaster_id`
+relationship. Distinct from `/api/v1/intelligence/{disaster_id}...`
+above (which always serves the demo scenario): this path serves real
+analysis-derived data, keyed by the existing `analysis_id`, never the
+demo scenario.
+
+```bash
+curl http://localhost:8000/api/v1/analysis/<analysis_id>/intelligence/recommendations
+```
+
+Every response carries `context_available`/`context_unavailable_reason`
+(e.g. `NO_GEOREFERENCE`, `INSUFFICIENT_EVIDENCE` — never fabricated when
+evidence is missing), `roads_available`/`roads_unavailable_reason`, and
+`resources_are_demo` (always `true` — no real resource-ingestion system
+exists). `.../recommendations` additionally bundles
+`resource_candidates` for the top-priority search zone, each with a
+`route_feasibility.status` of `"computed"` (a real route, via the same
+engine `POST /api/v1/routing` uses), `"route_unavailable"`, or
+`"not_applicable"`. **Errors:** `404` (no analysis with that id), `422`
+(`analysis_id` isn't a valid UUID).
+
 ### `GET /api/v1/analysis/{analysis_id}/summary` — AI-assisted incident briefing
 
 Synthesizes a completed analysis's damage/road-risk/(optionally) routing
@@ -526,25 +607,42 @@ existing `AnalysisRepository` — it contains no model code itself.
 
 `AnalysisProcessingService.process()` never lets an exception escape (it
 runs inside a `BackgroundTasks` callback with no HTTP client left to
-respond to) and never invents a prediction to paper over a missing model:
+respond to) and never invents a prediction to paper over a missing or
+failed model. As of Milestone F4 ("Real AI Inference & Model Serving" —
+see below), six distinct, precisely-mapped failure categories exist,
+each caught independently rather than collapsed into one generic bucket:
 
-- `ModelNotAvailableError` (raised by `TwoStageDamageModel` — currently
-  always, since Stage 1 has no real localizer; see "Why Stage 1 has no
-  real implementation yet," below) is caught and saved as `failed` with
-  `AnalysisErrorCode.MODEL_UNAVAILABLE` and a message describing which
-  stage was unavailable.
-- Any other exception during inference is caught, logged with a full
-  traceback server-side (`logger.exception`), and saved as `failed` with
-  `AnalysisErrorCode.INFERENCE_FAILURE` and a generic, safe message. **The
-  raw exception text/stack trace is never included in the API response.**
+- `ModelNotAvailableError` -> `AnalysisErrorCode.MODEL_UNAVAILABLE` — no
+  model is configured/loaded at all (`Settings.MODEL_ENABLED=False`, or
+  the legacy fine-tuned-checkpoint path with no checkpoint file).
+- `ModelLoadError` -> `MODEL_LOAD_FAILURE` — a real load was *attempted*
+  (e.g. downloading the pretrained CLIP checkpoint) but genuinely failed
+  (no network, corrupt cache, ...) — distinct from the above.
+- `InvalidImageError` -> `INVALID_IMAGE` — the stored image could not be
+  decoded at inference time (defense in depth; upload-time validation
+  already rejects this in the overwhelming majority of cases).
+- `ImageDimensionsExceededError` -> `PREPROCESSING_FAILURE` — the image
+  exceeds `Settings.MODEL_MAX_IMAGE_DIM` (a decompression-bomb guard).
+- `PostprocessingError` -> `POSTPROCESSING_FAILURE` — the model's raw
+  detections could not be assembled into a valid `DamageAnalysis`.
+- Any other, truly unexpected exception -> the generic
+  `AnalysisErrorCode.INFERENCE_FAILURE`, logged with a full traceback
+  server-side (`logger.exception`). **The raw exception text/stack trace
+  is never included in the API response** for any of the six.
 
 Either way, the API stays stable: `GET /api/v1/analysis/{id}` still
 returns `200` with a well-formed `DamageAnalysis` body — a structured
-failure, not a `500` or a hang. Because no building-localization model
-exists yet (see "Why Stage 1 has no real implementation yet," below),
-**every analysis through the real, unmodified production wiring today
-ends up `failed` with `MODEL_UNAVAILABLE`** — this is the honest,
-expected behavior of a system with no trained model, not a bug.
+failure, not a `500` or a hang. **Before Milestone F4**, no
+building-localization model existed at all, so every analysis through
+the real, unmodified production wiring ended up `failed` with
+`MODEL_UNAVAILABLE` unconditionally. **As of Milestone F4**, the default
+wiring (`Settings.MODEL_ENABLED=True`, `MODEL_PROVIDER="open_clip"`)
+performs genuine model inference and a real, uploaded image reaches
+`completed` — see "Milestone F4 — real inference," below, for the full
+architecture, and "Manual real-inference verification" for an actual
+observed run. Setting `MODEL_ENABLED=false` restores the original
+honest-`MODEL_UNAVAILABLE`-always behavior exactly, for an
+offline/no-network deployment.
 
 ### Synchronous vs. background processing
 
@@ -1910,7 +2008,106 @@ reports `model_loaded=False` and `locate()` raises `LocalizerNotAvailableError`
 — the same honesty contract Stage 2 provides when no checkpoint exists.
 `TwoStageDamageModel.predict()` normalizes both stages' failures to
 `ModelNotAvailableError`, so any caller only needs to handle one exception
-type regardless of which stage is missing.
+type regardless of which stage is missing. **This is still exactly true
+for `Settings.MODEL_PROVIDER="legacy_resnet"`** (the pre-F4 architecture,
+preserved unmodified as an option — see below for why it isn't the
+default anymore).
+
+## Milestone F4 — real inference
+
+Milestones 3A/3C above built the inference *architecture*; nothing in
+them ever produced a genuine prediction (Stage 1 had no implementation
+at all, and Stage 2 required an external fine-tuned checkpoint that was
+never trained). Milestone F4 makes `POST /api/v1/analysis` perform
+**real, working, CPU-only inference by default** — no training, no
+fine-tuning, no GPU, no fabricated/hardcoded/random output — by
+replacing both stages with implementations that don't need a checkpoint
+that doesn't exist:
+
+```
+Image -> [Stage 1: TileRegionLocalizer] -> crop each tile
+      -> [Stage 2: ClipZeroShotDamageClassifier] -> RawDetection
+      -> Postprocessor -> DamageAnalysis -> BuildingDamage -> SpatialRepository
+      -> (Milestone F3, unmodified) analysis_adapter -> search zones -> recommendations
+```
+
+### Model selection
+
+| | |
+|---|---|
+| **Model** | CLIP, architecture `ViT-B-32` |
+| **Version / pretrained tag** | `openai` (OpenAI's original published CLIP checkpoint, served via the Hugging Face Hub / `timm`) |
+| **Provider / library** | [`open_clip`](https://github.com/mlfoundations/open_clip) (`open_clip_torch` on PyPI) |
+| **Task used for** | Zero-shot damage-severity classification (Stage 2) — no object detection, no segmentation |
+| **Device** | CPU (`Settings.MODEL_DEVICE="cpu"`, the default; no CUDA anywhere in this codebase) |
+| **xBD-trained?** | **No.** This is a general-purpose pretrained vision-language model. It was never trained or fine-tuned on xBD, xView2, or any disaster-specific dataset. |
+| **License** | CLIP's original weights are released by OpenAI under the MIT license; `open_clip` itself is MIT-licensed. |
+
+**Why this model:** it is the only realistic way to get *real, working*
+inference out of a CPU-only, no-training, no-GPU milestone. Every
+alternative considered required either training data this repository
+doesn't have (a fine-tuned classifier — the original Milestone 3C plan,
+still fully implemented and available via `MODEL_PROVIDER="legacy_resnet"`,
+just never trained) or a pretrained model whose training classes don't
+include "building" (any standard COCO/Pascal-VOC detector — see "Why
+Stage 1 has no real implementation yet," above, for why that's still
+true). CLIP's zero-shot classification is a genuinely real, well-
+established technique (not a hack invented for this milestone): a real
+forward pass produces a real image embedding, compared via real cosine
+similarity against four real text-prompt embeddings
+(`app/ml/clip_classifier.py`'s `_DAMAGE_PROMPTS`), soft-maxed into a
+`RawDetection`. **No accuracy/precision/recall/F1/mAP/IoU claim is made
+anywhere in this codebase for this model** — none has been measured,
+and none should be assumed.
+
+### Confidence interpretation (F4 — read before using `confidence`)
+
+Exactly the same discipline "Confidence interpretation" (above)
+established for the legacy classifier, restated because it matters even
+more here: `RawDetection.confidence` is CLIP's own raw softmax
+probability over the 4 candidate prompts — genuine model output, never
+assigned manually — and it is **not a calibrated probability**. CLIP was
+never calibrated (or even trained) for damage-severity classification
+specifically, so a value of 0.9 does not mean "90% likely correct."
+Nothing converts this raw score into a fabricated percentage anywhere
+downstream — F3's `analysis_adapter.py` deliberately keeps
+`Uncertainty.confidence=None` throughout and only ever derives a
+qualitative `low`/`moderate`/`high` band from it (see
+`docs/architecture/intelligence.md`).
+
+### Why Stage 1 is deterministic tiling, not a "real" localizer
+
+Per "Why Stage 1 has no real implementation yet" above, no legitimate
+pretrained model detects buildings. Rather than wrap an unrelated
+detector and imply it does, `app/ml/tile_localizer.py::TileRegionLocalizer`
+deterministically partitions the image into a `Settings.MODEL_TILE_GRID`
+x `MODEL_TILE_GRID` grid (default `2` -> 4 tiles) of real, correctly-
+computed pixel regions — **not** a machine-learning model, and **not** a
+claim that each tile is a verified individual building. Every
+`BuildingDamage` produced this way genuinely represents "damage
+classification for this image region," which is what this milestone
+can honestly deliver; a real per-building detector remains a documented
+future extension (see "Recommended F5" in the Milestone F4 final
+report, or `docs/architecture/ai-engine.md`).
+
+### Model lifecycle (Milestone F4)
+
+`app/api/deps.py::get_building_localizer`/`get_damage_classifier` are
+each backed by a small, module-level, config-keyed cache (`_localizer_cache`/
+`_classifier_cache`) — a real model is downloaded/loaded **at most once
+per distinct configuration**, never once per request, the same
+"module-level singleton" pattern every in-memory repository in this
+codebase already uses (just parametrized by config instead of
+unconditional). A load failure (e.g. no network on a cold cache) is
+caught internally and turned into a `_LoadFailedClassifier` stand-in —
+it never crashes the *upload* request itself (which resolves the whole
+DI tree, including the model, before `POST /api/v1/analysis` even
+returns `201`); the failure only surfaces once background processing
+actually invokes the model, as an honest `MODEL_LOAD_FAILURE`.
+`GET /api/v1/model/status` (see `docs/api/endpoints.md`) reports
+`enabled`/`provider`/the real `ModelStatus` without triggering a load of
+its own — it reads whatever the existing DI wiring already
+constructed.
 
 ### CPU limitations
 
@@ -2015,26 +2212,32 @@ real predictions.
 
 ### Known limitations
 
-- **No trained model exists.** Every component in this section is real,
-  tested infrastructure — none of it currently produces a genuine damage
-  prediction end-to-end, because Stage 1 is always unavailable and Stage 2
-  has no checkpoint.
-- **Stage 1 (building localization) has no implementation plan committed
-  yet beyond the interface** — see "Why Stage 1 has no real implementation
-  yet," above.
+- **As of Milestone F4, real inference happens by default** — but Stage 1
+  is deterministic tiling, not a real per-building detector (no
+  legitimate one exists — see above), and Stage 2 is a general-purpose,
+  zero-shot CLIP classifier, **not** fine-tuned or trained on xBD or any
+  disaster-specific dataset. Treat predictions as a coarse, honestly-
+  uncalibrated signal — see "Confidence interpretation (F4)," above —
+  never a validated damage assessment.
+- **The original Milestone 3A/3C fine-tuned-checkpoint architecture
+  still exists and is fully preserved** (`MODEL_PROVIDER="legacy_resnet"`)
+  but remains untrained — no checkpoint has ever been produced for it.
 - **No pre/post-disaster comparison** — post-disaster image only (a
   documented Milestone 3A/3B decision, unchanged).
-- **No calibrated confidence** — see "Confidence interpretation," above.
 - **No geospatial (latitude/longitude) output** — `BoundingBox` is pixel-space
-  only; see "Geospatial future support," below.
+  only; see "Geospatial future support," below. Every F4 prediction is
+  therefore `georeferenced=False`/`coordinate_reference_system=IMAGE` —
+  F3's intelligence pipeline honestly reports `NO_GEOREFERENCE` for a
+  real, uploaded image unless a caller separately supplies georeferencing
+  (see `tests/test_ml_real_inference_integration.py`).
 - **This system does not predict, and cannot currently be used to predict,
   tsunamis, earthquakes, floods, or any other hazard** — its only intended
   eventual capability is post-hoc building damage severity from imagery of
   a disaster that has already occurred.
-- When a real model eventually exists, expect accuracy well below
-  published xView2 leaderboard numbers (which use full data, heavy
-  augmentation, and often GPU-scale ensembles) — this baseline
-  deliberately trades peak accuracy for a fast, honest, working pipeline.
+- **No accuracy/precision/recall/F1/mAP/IoU has been measured for the
+  CLIP zero-shot path** — `evaluate_classification()` remains available
+  (see "Evaluation methodology," above) for whenever ground-truth
+  damage-severity labels exist to measure against.
 
 ### Geospatial future support
 
@@ -2052,31 +2255,48 @@ scope for this milestone.
 
 SentinelAI's output informs real disaster-response decisions. A
 plausible-looking but fake damage assessment is worse than an honest "no
-model available" — it risks misdirecting rescue resources. Every stage in
-this pipeline (`UnavailableBuildingLocalizer`, `TorchDamageClassifier`
-with no checkpoint, `UnavailableDamageModel`) fails loudly rather than
-returning a placeholder result, and every `ModelStatus.model_loaded` is
-computed from real state, never hardcoded `True`.
+model available" — it risks misdirecting rescue resources. Every
+component that can genuinely fail (`UnavailableBuildingLocalizer`,
+`TorchDamageClassifier` with no checkpoint, `UnavailableDamageModel`,
+`ClipZeroShotDamageClassifier` before `load()` succeeds) fails loudly
+rather than returning a placeholder result, and every
+`ModelStatus.model_loaded` is computed from real state, never hardcoded
+`True`. As of Milestone F4, when a prediction *is* produced, it is a
+genuine forward pass through real pretrained weights — never a random
+number, a lookup table, or a value chosen to "look right" (see "Model
+selection," above).
 
-### Research integrity: four distinct things, not one
+### Research integrity: five distinct things, not one
 
 This codebase distinguishes, and this document uses the terms
 deliberately:
 
 1. **Model infrastructure** — the `DamageModel`/`BuildingLocalizer`
    Protocols, `TwoStageDamageModel`, preprocessing/postprocessing. Exists
-   today, fully tested, produces no predictions on its own.
-2. **A pretrained model** — e.g. ImageNet weights for the ResNet18
-   backbone. Not currently loaded by any shipped code path (see "Training
-   vs. inference"); used only as an external training starting point.
-3. **A fine-tuned model** — a checkpoint actually trained on xBD. **Does
-   not exist.** `Settings.MODEL_PATH` is unset by default and nothing in
-   this repository provides a checkpoint.
-4. **An evaluated model** — a fine-tuned model with measured metrics via
-   `evaluate_classification()`. **Does not exist**, since step 3 doesn't.
+   today, fully tested.
+2. **A pretrained model** — as of Milestone F4, genuinely loaded and used
+   by default: CLIP `ViT-B-32`/`openai`, real weights, real inference,
+   zero training required (see "Milestone F4 — real inference," above).
+   The legacy path's ImageNet weights for the ResNet18 backbone are a
+   separate case — not currently loaded by any shipped code path (see
+   "Training vs. inference"), used only as an external training starting
+   point for that (still-untrained) architecture.
+3. **A fine-tuned/xBD-trained model** — a checkpoint actually trained on
+   xBD. **Does not exist**, for either architecture.
+   `Settings.MODEL_PATH` is unset by default and nothing in this
+   repository provides one. The CLIP path (Milestone F4's default) does
+   not need one — it performs zero-shot classification instead — but it
+   is, for exactly that reason, also not xBD-trained.
+4. **A calibrated model** — one whose confidence scores are validated
+   against measured accuracy. **Does not exist** for either architecture
+   — see "Confidence interpretation (F4)," above.
+5. **An evaluated model** — a model with measured metrics via
+   `evaluate_classification()`. **Does not exist**, since no ground-truth
+   damage-severity ranking has ever been run against either model's
+   output.
 
-Nothing in this codebase represents an untrained or unavailable model as
-an operational damage predictor.
+Nothing in this codebase represents an untrained, uncalibrated, or
+unevaluated model as more validated than it actually is.
 
 ## Dataset pipeline (Milestone 3B)
 
@@ -2189,6 +2409,282 @@ label-JSON parsing against actual sample files and adjust if they differ —
 this is exactly why `list_samples`/`load_image_sample`/`load_annotations`
 fail loudly on anything unexpected rather than silently skipping it.
 
+## Disaster Intelligence Core (Milestone F2)
+
+The first version of the domain model and deterministic decision layer
+for the future response-orchestration pipeline (`app/intelligence/`,
+`app/services/intelligence_repository.py`,
+`app/services/intelligence_service.py`,
+`app/api/v1/endpoints/intelligence.py`). See
+[`docs/architecture/intelligence.md`](../../docs/architecture/intelligence.md)
+for the full architecture, pipeline diagram, and per-stage rationale —
+this section is a summary.
+
+### Domain model (`app/intelligence/schemas.py`)
+
+Thirteen typed concepts: `Disaster`, `Observation`, `AffectedArea`,
+`SearchZone`, `Hazard`, `Resource`, `RescueTeam`, `Infrastructure`,
+`Route`, `HazardPrediction`, `Recommendation`, `Evidence`, `Uncertainty`
+— plus one computed, non-primary type, `CapabilityMatchResult`. Every
+concept reuses existing types rather than duplicating them
+(`Geometry`/`CoordinateReferenceSystem` from `app.ml.geospatial`,
+`DamageClass` from `app.ml.schemas`, `AccessibilityStatus` from
+`app.roads.schemas`, `RouteResult` from `app.routing.schemas`), and
+every geometry-carrying field is paired with an explicit
+`*_crs: CoordinateReferenceSystem` (defaulting to `IMAGE`, the
+non-geographic default) — the same "never treat image-space coordinates
+as geographic" discipline `BuildingDamage` already established, applied
+one layer further out. Every entity carries `is_simulated: bool`.
+
+### Search-priority scoring (`app/intelligence/search_priority.py`)
+
+A deterministic **baseline heuristic** — not a validated
+search-and-rescue triage model, the same honesty as the road-risk
+formula (Milestone 6B):
+
+```
+priority_score = sum(value_i * weight_i for available factors)
+                  / sum(weight_i for available factors)
+```
+
+Four factors (damage severity, accessibility, population exposure,
+evidence strength), every weight sourced from `SearchPriorityConfig`
+(`app/intelligence/config.py`, itself from `Settings.SEARCH_PRIORITY_*`
+— see `app/core/config.py`). A factor with no underlying data (e.g. no
+`affected_population` on file) is **omitted and the remaining weights
+renormalized** — never treated as `0` (would silently penalize) or
+guessed. Every omission is recorded in `SearchZone.missing_factors` and
+escalates `SearchZone.uncertainty` one level. A `SearchZone` is never a
+claim a person is located there.
+
+### Capability matching (`app/intelligence/capability_matching.py`)
+
+Given a target and a list of `Resource`s, answers four questions
+**separately**, never collapsed into one opaque score: can this
+resource perform the task (exact capability-set match), is it currently
+available, can it reach the target (great-circle distance, only when
+both locations are explicitly tagged `WGS84` — otherwise `UNKNOWN`,
+never guessed), and is the route operational (a documented
+simplification: checked via the resource's own blocking operational
+constraints, not a full per-candidate route computation — see the
+module docstring for why). A capability mismatch or unavailability
+always outranks proximity — the nearest resource is not automatically
+the best one.
+
+### Recommendation engine (`app/intelligence/recommendation.py`)
+
+Three rule-based, deterministic rules — **no LLM, no ML model**:
+a high-priority search zone with incomplete evidence recommends
+reconnaissance; one with sufficient evidence and an eligible resource
+recommends deployment; one with no eligible resource recommends
+escalation. A non-operational bridge/road/tunnel recommends inspection
+before dispatch. A high/critical hazard recommends avoiding the route.
+Every `Recommendation` carries a non-empty `rationale`, `supporting_evidence`,
+and `uncertainty`. If nothing meets the action threshold, the engine
+returns one explicit `hold_pending_more_information` recommendation
+rather than a bare empty list.
+
+### Hazard prediction — deliberately unimplemented
+
+`app/intelligence/hazard_prediction.py::unavailable_prediction()` is the
+**only** way this codebase constructs a `HazardPrediction` — always
+`status="unavailable"`, `probability=None`. No predictive hazard model
+exists in this milestone; the schema exists so a real model can be
+plugged in later without an API-contract change.
+
+### Demo scenario (`app/intelligence/demo_scenario.py`)
+
+One deterministic, fully `is_simulated=true` scenario, seeded into the
+in-memory repository once at process start (`app/api/deps.py`) — there
+is no ingestion endpoint yet, so without this seed the four
+`/api/v1/intelligence/*` endpoints would be permanently unreachable.
+Every id is generated via `uuid5(NAMESPACE_URL, ...)` from a fixed name
+string (not `uuid4()`), so the scenario — and every id in it — is
+byte-for-byte identical on every run, forever. Coordinates are centered
+on `(1.5, 1.5)`, the same deliberately fictional open-ocean point the
+frontend's own demo fixtures use. Built to demonstrate that **having
+equipment is not enough**: it includes a capable-but-`unavailable`
+resource (a real drone/excavator/team exists but can't deploy), a
+resource that's available and reachable but lacks the required
+capability, and exactly one resource that passes all four capability-
+matching gates.
+
+### Repository (`app/services/intelligence_repository.py`)
+
+`InMemoryIntelligenceRepository` — same in-memory-placeholder tradeoff
+and PostGIS-migration story as `InMemorySpatialRepository`/
+`InMemoryRoadNetworkRepository`. `SearchZone`s and `Recommendation`s are
+**not** stored: both are pure functions of the repository's raw inputs
+plus config, recomputed fresh on every request (cheap — no ML
+inference, no network I/O) rather than cached and risking staleness.
+
+### Do not implement (this milestone)
+
+- No ML-based hazard/search prediction model — `HazardPrediction` is
+  interface-only (see above).
+- No LLM-based recommendation generation — the engine is entirely
+  rule-based.
+- No real-disaster ingestion endpoint — only the deterministic demo
+  scenario is servable.
+- No per-candidate route computation in capability matching — route
+  operability is inferred from known operational constraints, not a
+  full routing-engine query per resource-target pair.
+- No persistence — the repository is in-memory, like every other
+  repository in this codebase today.
+
+## Analysis-Aware Intelligence (Milestone F3)
+
+Connects the Disaster Intelligence Core (above) to the *real* analysis
+pipeline's outputs — `app/intelligence/analysis_adapter.py`,
+`app/services/analysis_intelligence_service.py`,
+`app/api/v1/endpoints/analysis.py`'s three `.../intelligence[...]`
+routes. See
+[`docs/architecture/intelligence.md`](../../docs/architecture/intelligence.md),
+"Milestone F3," for the full design; this section is a summary.
+
+```
+User Upload -> Analysis -> Damage/Risk/Infrastructure Observations
+            -> Intelligence Context -> Search Priority
+            -> Resource Capability Matching -> Route Feasibility
+            -> Response Recommendation -> Command Center UI
+```
+
+**Not a second intelligence system** — F3 adds exactly one adapter
+(`build_context_from_analysis`) that turns an already-completed
+analysis's real `DamageAnalysis`/`list[BuildingDamage]`/`RoadRiskResponse`
+into an F2 `DisasterScenario`, then reuses F2's search-priority/
+capability-matching/recommendation engines completely unmodified.
+
+### `analysis_id` vs `disaster_id`
+
+Kept as genuinely separate concepts, not renamed or merged:
+`app.intelligence.analysis_adapter.derive_disaster_id(analysis_id) ->
+UUID` is a pure, deterministic `uuid5(...)` derivation — never stored,
+never cached, recomputed fresh on every request. See the architecture
+doc for the alternatives considered and why this is the smallest clean
+solution.
+
+### Missing-data behavior
+
+`build_context_from_analysis` returns an explicit unavailable reason —
+never a fabricated or silently-empty scenario — for: the analysis not
+being `COMPLETED` yet, a `MODEL_UNAVAILABLE`/`INFERENCE_FAILURE`
+analysis failure (the same `AnalysisErrorCode` values reused verbatim),
+zero buildings (`INSUFFICIENT_EVIDENCE`), or zero *georeferenced*
+buildings (`NO_GEOREFERENCE`). Only `BuildingDamage` records that are
+both `georeferenced=True` **and** explicitly tagged
+`CoordinateReferenceSystem.WGS84` become `AffectedArea`s — the same
+defense-in-depth CRS check `RoadRiskService._is_usable()` already
+applies, re-verified here rather than trusted from a single flag.
+
+### Route feasibility
+
+For the single top-ranked, otherwise-eligible resource candidate against
+the single top-priority search zone, `analysis_intelligence_service.py`
+calls the real `RoutingService.route()` — the same engine
+`POST /api/v1/routing` uses, never a second pathfinder or invented
+geometry. Reported as one of `"computed"` (a real, possibly
+`found=false`, `RouteResult`), `"route_unavailable"` (no road network
+loaded, or a location isn't tagged `EPSG:4326`), or `"not_applicable"`
+(an earlier gate failed, or this candidate wasn't the top-ranked one —
+route feasibility is deliberately bounded to one candidate per request).
+
+### DEMO vs ANALYSIS
+
+No real resource-ingestion system exists, so the resource pool for any
+analysis-derived scenario reuses `build_demo_scenario().resources`
+verbatim — `resources_are_demo: true` unconditionally in every F3
+response, independent of whether the surrounding analysis (and its
+search zones/recommendations, `is_simulated: false`) is real. The
+frontend's Demo mode is a wholly separate, hand-authored fixture path
+(`apps/web/src/lib/demo/demo-data.ts`) that never calls these endpoints
+at all — see `docs/architecture/frontend.md`.
+
+### Do not implement (this milestone)
+
+- No change to F2's scoring/matching/recommendation math — F3 is
+  purely an adapter plus a route-feasibility enrichment step.
+- No real resource-ingestion system — the demo resource pool is reused,
+  always explicitly flagged `resources_are_demo: true`.
+- No per-candidate routing beyond the single top-ranked candidate.
+- No change to any existing analysis (`/api/v1/analysis/{id}[...]`) or
+  F2 disaster-scoped (`/api/v1/intelligence/{disaster_id}[...]`)
+  endpoint — both are unchanged and fully backward compatible.
+
+## Production infrastructure (Milestone F5)
+
+Real PostgreSQL persistence, a Redis-backed background job queue, and a
+separate worker process that owns the real CLIP model — see
+[`docs/architecture/production.md`](../../docs/architecture/production.md)
+for the full architecture; this section is a summary.
+
+```
+POST /api/v1/analysis
+  -> persist (PostgreSQL) -> store image (object storage)
+  -> enqueue (Redis/RQ) -> 201, immediately
+       |
+       v
+   worker process (python -m app.worker.main)
+  -> AnalysisProcessingService.process() [unchanged from Milestone 4]
+  -> persisted result
+```
+
+**The API process never imports `torch`/`open_clip` and never loads the
+model** — fixing F4's own documented 40-150s in-request cold start.
+Only `app/worker/main.py` (a separate process/entrypoint) does, once, at
+its own startup, publishing readiness to Redis
+(`GET /api/v1/model/status` reads it back — the API never constructs a
+`DamageModel` merely to answer that endpoint).
+
+**Persistence**: two tables (`analyses`, `building_damages` —
+`app/db/models.py`), not a one-to-one mirror of every schema. Search
+zones/recommendations/routes are deliberately **not** persisted — F2/F3's
+own "recompute fresh, never cache" design principle already applies;
+see `docs/architecture/production.md`, "Persistence," for the full
+reasoning. `PostgresAnalysisRepository`/`PostgresSpatialRepository`
+implement the exact same Protocols the pre-existing in-memory
+repositories do — production DI swaps to them; the in-memory
+implementations are unchanged and still back every test.
+
+**Migrations**: Alembic (`apps/api/alembic/`) —
+`alembic upgrade head`. Reads `Settings.DATABASE_URL`, never a second
+hardcoded connection string.
+
+**Queue**: RQ (Redis Queue), not Celery — "do not add Celery solely
+because it is popular" when RQ's `enqueue`/`Worker` over a plain Redis
+list already solves this system's actual problem. `RedisJobQueue`
+(production) / `InMemoryJobQueue` (test-only, synchronous).
+
+**Idempotency was already structurally guaranteed before F5** —
+`AnalysisProcessingService.process()`'s existing terminal-state guard
+plus every repository's replace- (not append-) semantics. F5's job was
+to verify this and add bounded retries (`JOB_MAX_RETRIES`, RQ's
+`Retry`) for the one class of failure that genuinely needs it —
+infrastructure exceptions that already propagate un-guarded out of
+`process()`'s own existing structure.
+
+**Health/readiness**: `GET /health` (liveness only) is unchanged;
+`GET /ready` (new) gates on real PostgreSQL + Redis connectivity, with
+model status reported but never gating — a request can be accepted
+while the model is still loading.
+
+**Docker**: `docker compose up --build` — see
+[`docker/README.md`](../../docker/README.md). One image
+(`docker/api.Dockerfile`), two roles (`api`: `uvicorn`; `worker`:
+`python -m app.worker.main`), plus `postgres`/`redis`/a one-shot
+`migrate` service.
+
+### Do not implement (this milestone)
+
+- No authentication/authorization.
+- No cloud deployment, autoscaling, or high availability — Docker
+  Compose is a local production-*style* stack, not a deployment target.
+- No object storage backend beyond local disk (`LocalObjectStorage`) —
+  the interface is designed for S3/R2/GCS later, not built here.
+- No multi-worker horizontal scaling tested (RQ supports it natively;
+  `docker-compose.yml` runs one `worker` service).
+- No dead-letter/poison-queue inspection tooling.
+
 ## Project layout
 
 ```
@@ -2203,10 +2699,10 @@ app/
 │   ├── deps.py                     # Shared dependency providers
 │   ├── exception_handlers.py        # Maps service-layer errors to HTTP responses
 │   ├── root.py                       # Unversioned GET /
-│   ├── health.py                      # Unversioned GET /health
+│   ├── health.py                      # Unversioned GET /health, GET /ready (Milestone F5)
 │   └── v1/                             # Versioned routers, mounted under /api/v1
 │       ├── router.py
-│       └── endpoints/ {status.py, system.py, analysis.py, roads.py, routing.py}
+│       └── endpoints/ {status.py, system.py, analysis.py, roads.py, routing.py, intelligence.py}
 ├── services/
 │   ├── system_service.py             # Backing service/DI scaffold (Milestone 1)
 │   ├── analysis_service.py            # Orchestrates upload validation, storage, metadata
@@ -2222,7 +2718,22 @@ app/
 │   ├── road_risk_service.py                     # Milestone 6B: assembles the road-risk response
 │   ├── routing_service.py                        # Milestone 6C: assembles routing/comparison results
 │   ├── incident_intelligence_service.py           # Milestone 7: assembles the incident briefing
+│   ├── intelligence_repository.py                  # Milestone F2: DisasterScenario storage (in-memory)
+│   ├── intelligence_service.py                      # Milestone F2: orchestrates the F2 pipeline
+│   ├── analysis_intelligence_service.py               # Milestone F3: analysis -> intelligence -> route feasibility
+│   ├── postgres_analysis_repository.py                  # Milestone F5: PostgreSQL-backed AnalysisRepository
+│   ├── postgres_spatial_repository.py                    # Milestone F5: PostgreSQL-backed SpatialRepository (same table)
+│   ├── job_queue.py                                       # Milestone F5: JobQueue protocol, RedisJobQueue, InMemoryJobQueue
+│   ├── worker_status.py                                    # Milestone F5: Redis-backed model-lifecycle publish/read channel
+│   ├── model_status_service.py                              # Milestone F4; F5: reads worker_status, never loads the model
+│   ├── readiness_service.py                                  # Milestone F5: GET /ready — real DB/Redis checks
 │   └── exceptions.py                              # Domain errors (no FastAPI dependency)
+├── db/                          # Milestone F5 — see docs/architecture/production.md
+│   ├── models.py                  # AnalysisORM, BuildingDamageORM (SQLAlchemy declarative)
+│   └── session.py                   # Engine/session-factory cache, keyed by DATABASE_URL
+├── worker/                      # Milestone F5 — the background worker process
+│   ├── main.py                    # Entrypoint (`python -m app.worker.main`): eager model load + RQ Worker loop
+│   └── tasks.py                     # process_analysis_job() — the actual per-job function RQ invokes
 ├── ml/                          # Damage-intelligence architecture (Milestones 3A + 3C) — see above
 │   ├── schemas.py
 │   ├── spatial.py                 # BoundingBox
@@ -2281,9 +2792,21 @@ app/
 │   ├── validator.py                                 # parse_llm_output() — Pydantic-validated JSON parsing
 │   ├── grounding.py                                   # filter_unsupported_claims()
 │   └── briefing_builder.py                              # assemble_briefing()
+├── intelligence/                # Milestone F2 — see above and app/intelligence/__init__.py
+│   ├── schemas.py                 # The 13 domain concepts + CapabilityMatchResult
+│   ├── config.py                    # SearchPriorityConfig, CapabilityMatchingConfig
+│   ├── search_priority.py             # Deterministic baseline search-priority scorer
+│   ├── capability_matching.py           # Deterministic capability matcher
+│   ├── recommendation.py                  # Rule-based recommendation engine
+│   ├── hazard_prediction.py                 # unavailable_prediction() — no ML model exists yet
+│   ├── demo_scenario.py                       # build_demo_scenario() — deterministic, is_simulated=true
+│   └── analysis_adapter.py                      # Milestone F3: DamageAnalysis+BuildingDamage+RoadRiskResponse -> DisasterScenario
 ├── schemas/                    # Pydantic request/response models
 ├── utils/                      # Generic helpers with no business meaning (datetime, sanitize)
 └── middleware/                  # CORS policy, request logging
+alembic/                        # Milestone F5 — migrations (alembic upgrade head)
+├── env.py                        # Reads Settings.DATABASE_URL, never a hardcoded URL
+└── versions/0001_initial.py        # analyses, building_damages
 tests/                          # pytest suite
 ```
 

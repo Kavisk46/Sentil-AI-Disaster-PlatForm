@@ -36,7 +36,9 @@ from uuid import UUID
 
 from app.core.logging import get_logger
 from app.ml.inference import DamageInferenceEngine
-from app.ml.model import ModelNotAvailableError
+from app.ml.model import ModelLoadError, ModelNotAvailableError
+from app.ml.postprocessing import PostprocessingError
+from app.ml.preprocessing import ImageDimensionsExceededError, InvalidImageError
 from app.ml.schemas import BuildingDamage, DamageAnalysis
 from app.schemas.analysis import AnalysisErrorCode, AnalysisFailure, AnalysisStatus
 from app.services.analysis_repository import (
@@ -110,6 +112,39 @@ class AnalysisProcessingService:
                 analysis_id,
                 AnalysisErrorCode.MODEL_UNAVAILABLE,
                 _MODEL_UNAVAILABLE_MESSAGE_PREFIX + str(exc),
+            )
+            return
+        except ModelLoadError as exc:
+            # Milestone F4: a real load attempt was made (unlike
+            # ModelNotAvailableError above) but genuinely failed — e.g. a
+            # network error fetching a pretrained checkpoint. Logged in
+            # full server-side; the client only ever sees the generic,
+            # safe message.
+            logger.exception("Analysis %s failed: model load failure (%s)", analysis_id, exc)
+            self._save_failure(
+                analysis_id,
+                AnalysisErrorCode.MODEL_LOAD_FAILURE,
+                _GENERIC_INFERENCE_FAILURE_MESSAGE,
+            )
+            return
+        except InvalidImageError:
+            logger.info("Analysis %s failed: invalid image content at inference time", analysis_id)
+            self._save_failure(
+                analysis_id,
+                AnalysisErrorCode.INVALID_IMAGE,
+                "The stored image could not be decoded for analysis.",
+            )
+            return
+        except ImageDimensionsExceededError as exc:
+            logger.info("Analysis %s failed: image dimensions exceeded (%s)", analysis_id, exc)
+            self._save_failure(analysis_id, AnalysisErrorCode.PREPROCESSING_FAILURE, str(exc))
+            return
+        except PostprocessingError:
+            logger.exception("Analysis %s failed during postprocessing", analysis_id)
+            self._save_failure(
+                analysis_id,
+                AnalysisErrorCode.POSTPROCESSING_FAILURE,
+                _GENERIC_INFERENCE_FAILURE_MESSAGE,
             )
             return
         except Exception:

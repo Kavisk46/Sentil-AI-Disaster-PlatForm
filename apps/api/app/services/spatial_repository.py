@@ -71,7 +71,7 @@ class SpatialRepository(Protocol):
         ...
 
 
-def _envelope(building: BuildingDamage) -> BoundingBoxGeometry | None:
+def envelope_of(building: BuildingDamage) -> BoundingBoxGeometry | None:
     """The axis-aligned bounding envelope of `building.geometry` — every
     `Geometry` variant has one, even a `PolygonGeometry` (a future
     PostGIS-backed implementation would use `ST_Envelope` for this).
@@ -122,7 +122,7 @@ class InMemorySpatialRepository:
     ) -> list[BuildingDamage]:
         result = []
         for building in self.get_buildings(analysis_id) or []:
-            envelope = _envelope(building)
+            envelope = envelope_of(building)
             if envelope is not None and envelope.intersects(bbox):
                 result.append(building)
         return result

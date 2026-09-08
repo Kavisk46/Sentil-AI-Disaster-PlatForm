@@ -41,6 +41,13 @@ class AnalysisErrorCode(StrEnum):
 
     MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
     INFERENCE_FAILURE = "INFERENCE_FAILURE"
+    # Milestone F4 — more precise failure categories than the generic
+    # INFERENCE_FAILURE catch-all above, each raised by a distinct pipeline
+    # stage (see app/ml/inference.py, app/services/analysis_processing_service.py).
+    MODEL_LOAD_FAILURE = "MODEL_LOAD_FAILURE"
+    INVALID_IMAGE = "INVALID_IMAGE"
+    PREPROCESSING_FAILURE = "PREPROCESSING_FAILURE"
+    POSTPROCESSING_FAILURE = "POSTPROCESSING_FAILURE"
 
 
 class AnalysisFailure(BaseModel):

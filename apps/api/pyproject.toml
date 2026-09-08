@@ -17,6 +17,29 @@ dependencies = [
     # GPU-only artifact regardless — see apps/api/README.md.
     "torch>=2.8,<3.0",
     "torchvision>=0.19,<1.0",
+    # Milestone F4: zero-shot damage classification via a real, pretrained
+    # CLIP checkpoint (no fine-tuning/training required — see
+    # apps/api/README.md, "Milestone F4 — real inference"). CPU-compatible;
+    # no CUDA requirement. Chosen over `transformers` (which also ships
+    # CLIP) as the smaller, more targeted dependency for exactly this
+    # use case — see "Dependency discipline" in the same README section.
+    "open_clip_torch>=3.3,<4.0",
+    # Milestone F5 — production infrastructure: real persistence (Postgres
+    # via SQLAlchemy + Alembic migrations) and a Redis-backed job queue for
+    # background analysis processing, replacing FastAPI BackgroundTasks.
+    # See apps/api/README.md ("Milestone F5") and docs/architecture/production.md.
+    "sqlalchemy>=2.0,<3.0",
+    "alembic>=1.13,<2.0",
+    # Pure-Python PostgreSQL driver (psycopg 3) — installs its own bundled
+    # libpq via the [binary] extra, no system compiler/libpq-dev required.
+    "psycopg[binary]>=3.1,<4.0",
+    "redis>=5.0,<6.0",
+    # RQ (Redis Queue): a deliberately small, well-established job queue —
+    # not Celery, which this milestone's own brief explicitly says not to
+    # add "solely because it is popular" when a simpler architecture is
+    # sufficient. RQ's entire API is enqueue/Worker; no message broker
+    # protocol, no separate scheduler process to run.
+    "rq>=1.16,<2.0",
 ]
 
 [project.optional-dependencies]
