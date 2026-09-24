@@ -63,6 +63,44 @@ of the corresponding Pydantic schema in `apps/api/app/**/schemas.py` — see
 each file's docstring for exactly which backend file it mirrors. `any` is
 not used anywhere in this milestone's code to bypass that typing.
 
+## Design system (Milestone F6)
+
+The visual language is a dark, glass, "operational instrument" aesthetic —
+deliberately closer to Palantir Foundry or a Vercel dashboard than a
+generic admin panel — layered entirely through CSS custom properties in
+`app/globals.css`, not through per-component styling. Every shared
+primitive (`Card`, `Badge`, `Button`, ...) already consumes these tokens
+(`bg-card`, `bg-primary`, etc.) rather than hardcoded colors, so this
+milestone's changes reached every panel by editing one file, not dozens.
+
+- **Accent color**: a cyan-blue "sentinel" hue (`--primary`/`--ring`/
+  `--accent`) replaces the previous pure-grayscale primary — used for
+  buttons, focus rings, links, and the hero glow. Risk/damage/priority
+  semantic colors (`lib/risk-colors.ts` — reds/ambers/greens for
+  severity) are a separate, unaffected system; this token only governs
+  brand/interaction chrome.
+- **Dark-by-default**: `ThemeProvider` (`components/providers/theme-provider.tsx`)
+  sets `defaultTheme="dark"` — a disaster-response command center reads as
+  an operational instrument primarily in its dark form. The light theme
+  and the top-bar toggle are both fully preserved; this only changes what
+  a first-time visitor sees before choosing.
+- **Glass surfaces**: `glass-panel`/`glass-panel-elevated` utilities
+  (blur + border + inset highlight, themed via `--glass-bg`/
+  `--glass-border`/`--glass-highlight`) are used consistently for every
+  piece of floating chrome over the map or content (top bar, map legend,
+  incident status bar, map overlay buttons) — no ad hoc
+  `bg-background/70 backdrop-blur-md` usage remains outside this utility.
+- **Cinematic depth**: a static (non-animated) radial gradient glow
+  (`--sentinel-glow`) is painted behind the page in `@layer base`, and a
+  `text-glow` utility applies the same glow behind hero/status text. Both
+  are near-invisible in light mode by design (low opacity against a white
+  background) — this is a dark-mode-first effect, not a mode-specific
+  hack.
+- **Severity-driven glow**: `IncidentStatusBar` adds a faint red glow only
+  when `severity === "critical"` — a supplementary cue, never the only
+  signal (the status bar's text/badge codes already satisfy WCAG 1.4.1
+  without it).
+
 ## Map technology
 
 **MapLibre GL JS**, per the architectural direction already recorded here
@@ -74,20 +112,23 @@ expressions with one less abstraction layer.
 **3D/WebGL, honestly scoped**: the map runs a real WebGL scene with camera
 `pitch` (tilt, default 45°) and `bearing` (rotation) enabled and a
 `NavigationControl` exposing both — genuine 3D camera movement, not a
-decorative 3D shape. Real terrain (a raster-DEM elevation source) and 3D
-building extrusions are **not** implemented: MapLibre's terrain support
-needs an elevation tile provider, and this project has no such provider
-configured (no API key, no vendor chosen) — fabricating one, or extruding
-buildings from data the backend doesn't provide, would violate this
-project's "never invent geography" principle applied one layer further out.
-This is recorded as a known limitation, not silently omitted.
+decorative 3D shape. As of Milestone F6.1, real terrain elevation is also
+implemented — see "Cinematic 3D geospatial command center" below for what
+is and is not implemented, and why.
 
-**Basemap style**: defaults to MapLibre's own free "demotiles" style
-(`https://demotiles.maplibre.org/style.json`, maintained by the MapLibre
-project for exactly this purpose — no account or API key required).
-Production deployments that want richer cartography can set
-`NEXT_PUBLIC_MAP_STYLE_URL` to a real tile provider's `style.json` without a
-code change (see `apps/web/.env.example`).
+**Basemap style**: defaults to CARTO's free, no-API-key vector styles —
+`dark-matter` in dark theme, `positron` in light theme (the same styles
+MapLibre's own official examples use) — read once at map construction via
+`document.documentElement.classList.contains("dark")`, the same "read
+once at mount" pattern already used for `prefersReducedMotion` (see the
+component-level comment in `command-map.tsx`). Toggling the theme after
+the map has already loaded does not re-style the already-loaded basemap —
+a documented limitation, not a bug; `MapLibre.setStyle` would additionally
+require re-adding every custom source/layer on `style.load`, which isn't
+implemented. `NEXT_PUBLIC_MAP_STYLE_URL`, if set, overrides both themes —
+production deployments that want a specific tile provider (or to restore
+the previous MapLibre "demotiles" default) can still point at one without
+a code change (see `apps/web/.env.example`).
 
 **SSR safety**: `command-map.tsx` never imports `maplibre-gl` at module
 scope — it's loaded with a dynamic `import("maplibre-gl")` inside
@@ -96,6 +137,122 @@ even if a caller forgets the wrapper. `command-map-loader.tsx` additionally
 wraps the component in `next/dynamic(..., { ssr: false })`, which is the
 primary mechanism callers are expected to use; the `useEffect`-only load is
 defense in depth, not the only safeguard.
+
+## Cinematic 3D geospatial command center (Milestone F6.1)
+
+Builds on "Map technology" above and F6's design system — same MapLibre
+GL JS foundation, no new rendering stack (no Three.js, no custom WebGL).
+
+**Real terrain, honestly scoped**: `command-map.tsx` adds Mapzen's public
+"Terrarium" elevation tiles (`registry.opendata.aws/terrain-tiles`, free,
+keyless, the same dataset MapLibre's own terrain examples use) as a
+`raster-dem` source and calls the real `map.setTerrain()` API — genuine
+measured elevation displacement, not a decorative effect. A `hillshade`
+layer from the same source is inserted *before* the base style's first
+layer so it shades underneath roads/labels rather than washing them out.
+**3D building extrusion is deliberately not implemented**: there is no
+free, keyless source of real per-building height data verified for the
+CARTO basemap (`fill-extrusion` needs a numeric height field; CARTO's
+`building` layer was confirmed, via inspecting the style's actual
+layers, to be flat 2D fills with no documented height attribute) —
+extruding buildings to an assumed/uniform height would fabricate geometry
+the source doesn't provide, which this project's CRS/data-honesty rules
+forbid one layer further out. A responder can toggle terrain off (flat,
+precise top-down) via the map-controls stack below — useful when reading
+exact positions matters more than atmosphere.
+
+**Cinematic camera, once per incident, never fighting the user**: the
+existing bounds-fitting effect now distinguishes a dataset's *first*
+appearance (idle → populated) from every later update. The first time
+real bounds exist, the camera does one `flyTo` with a deliberate
+pitch/bearing composition (55°/18°, ~2.2s, eased) — a genuine "entering
+the incident" moment. Every subsequent data change (a new layer arriving)
+uses the original plain `fitBounds`, which does not touch pitch/bearing —
+so it never re-flies the camera over a pitch/bearing the responder has
+since adjusted manually. The one-time flag resets when bounds disappear
+(e.g. clearing the active analysis), so the next incident gets its own
+entrance. `autoRotate` (continuous bearing drift) remains landing-hero-only,
+unchanged from F1 — the dashboard camera never spins on its own.
+
+**Priority-zone prominence**: two additional per-zone layers sit alongside
+the existing halo+core circle pair — a selection ring (`-selected`,
+filtered to whichever id `selectedZoneId` names, a stroke-only *shape*
+difference so it doesn't depend on color) and a pulse ring (`-pulse`,
+filtered to `topSearchZoneId` only — never every zone, so "look here
+first" stays unambiguous). The pulse toggles its radius/opacity on a
+bounded `setInterval` (900ms), not a per-frame animation loop, and is
+skipped entirely under `prefers-reduced-motion`. Clicking a zone on the
+map (`map.on("click", SOURCE_IDS.searchZones, ...)`) and clicking one in
+`IntelligencePanel` both drive the same lifted `selectedZoneId` state in
+`command-center.tsx` — see `IntelligencePanel`'s own doc comment for how
+its selection prop stays backward-compatible (controlled when
+`selectedZoneId`/`onSelectZone` are passed, uncontrolled — its original
+internal `useState` — otherwise, so no existing usage or test broke).
+
+**Route visualization**: `animateRouteReveal()` progressively reveals a
+route's *already-computed* real coordinate list over ~700ms
+(ease-out) instead of drawing the full line instantly — never
+interpolated or invented points, purely a reveal order over real data.
+Applied to all three route layers (distance-only, risk-aware,
+recommended). The recommended-route layer additionally gets a slow
+opacity pulse (`setInterval`, 700ms) as a restrained "this is live" cue.
+(A literal dash-offset "marching ants" effect was deliberately not used:
+MapLibre has no `line-dashoffset` paint property, and hand-rolling one by
+shifting `line-dasharray` pairs risks a transiently negative — invalid —
+array; the opacity pulse achieves the same cue safely.) All three
+animations are skipped (route drawn instantly, no pulse) under
+`prefers-reduced-motion`.
+
+**Resource markers, real vs. demo data honesty**: `CommandMapProps.resources`
+renders real WGS84 `Resource` points with availability-coded color. Demo
+mode plots the full `DEMO_RESOURCES` fixture (real type/capabilities/
+location for all three simulated assets). Real (F3) mode can only ever
+honestly plot the *top* capability-match candidate's location — F3's
+`AnalysisCapabilityMatch`/`CapabilityMatchResult` contracts have no
+resource-location field of their own, only a computed route, whose start
+point *is* that resource's real starting location — so
+`command-center.tsx` derives one marker per candidate with a *found*
+route, leaving `type`/`capabilities` honestly generic/empty (never
+guessed) and passing through the real `is_simulated` flag (today always
+`true` — no live resource-ingestion system exists yet, same
+`resourcesAreDemo` caveat `IntelligencePanel` already discloses).
+
+**Hazards & infrastructure — an honest gap, not a fake layer**: F3's
+`AnalysisIntelligenceContextResponse` exposes `hazard_count`/
+`infrastructure_count` but no geometry for either — no endpoint in any
+milestone through F6.1 returns hazard/infrastructure *locations* for a
+real analysis, and the demo fixtures don't invent any either. Rather than
+plot fabricated pins, `MapLegend`'s new "Hazards & infrastructure" row
+discloses the counts as text with an explicit "not shown on the map (no
+geometry available)" caveat — hidden entirely when both counts are
+unknown (Demo mode, which doesn't fetch this response at all), shown
+(including an honest `0`) whenever the real count is known.
+
+**Map controls**: a small `glass-panel` button stack (top-left, clear of
+`NavigationControl`/`ScaleControl` and the existing "Clear points"/"Show
+panels" buttons) — 3D/2D toggle, recenter on the incident, locate the
+top-priority zone, focus the current route, reset north. Every button is
+a real `<button>` with `aria-label`/`title`, disabled (not hidden) when
+its target doesn't exist yet, and hidden entirely on the decorative
+landing hero (`interactive=false` there) and non-interactive maps. Zoom
+and compass-reset are already covered by the existing `NavigationControl`,
+so this stack doesn't duplicate them beyond the explicit "reset north"
+button (kept for a clearer label than the compass icon alone).
+
+**Incident focus**: a restrained radial highlight (`--sentinel-glow`,
+already defined for F6's design system) painted as a pure-CSS overlay
+`div` over the map container once real bounds exist — never tied to a
+geographic coordinate or screen projection, so it cannot be mistaken for
+plotted data. Absent on the landing hero and before any analysis has
+bounds to show.
+
+**Performance**: no new rendering library. Every animation above uses
+either a single short `requestAnimationFrame` burst (route reveal, ends
+in ~700ms) or a bounded `setInterval` (zone pulse, route opacity —
+neither a continuous per-frame loop). Terrain/hillshade are native
+MapLibre GL features rendering standard-sized DEM tiles, the same
+mechanism any MapLibre terrain demo uses. All motion is skipped under
+`prefers-reduced-motion`, which also reduces GPU/CPU cost on request.
 
 ## Landing page and hero map
 

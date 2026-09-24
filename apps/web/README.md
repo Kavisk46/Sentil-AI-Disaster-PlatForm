@@ -22,13 +22,20 @@ upload, or turning on Demo Mode, navigates to `/dashboard`, the analysis
 workspace (map, damage/risk/route/briefing/search-and-response-intelligence
 panels). `/dashboard` is also directly loadable on its own.
 
-**Note on the default backend configuration**: with no trained model
-checkpoint (`Settings.MODEL_PATH`) and no road network loaded, a real
-uploaded analysis will deterministically end in a `failed`
-(`MODEL_UNAVAILABLE`) status, and routing/road-risk will report
-unavailable — this is the backend's own honest behavior, not a frontend
-bug. **Demo Mode** (the toggle in the top bar) is the way to see the fully
-populated UI without a real model/road-network deployment; it's always
+**Note on the default backend configuration**: since Milestone F4, the
+default configuration (`MODEL_ENABLED=True`, `MODEL_PROVIDER=open_clip`)
+runs **real** CPU inference — deterministic tile localization plus
+zero-shot CLIP (`ViT-B-32`/`openai`) damage classification, not a model
+trained on disaster imagery (see the root [`README.md`](../../README.md#aiml-approach)).
+A real upload therefore genuinely processes and completes; the checkpoint
+downloads once on first use (network required that one time, then
+cached). With no road network loaded, routing/road-risk will still
+honestly report unavailable regardless of model configuration.
+Uploads can still end in a `failed` (`MODEL_LOAD_FAILURE`) status on a
+fully offline environment where the checkpoint cannot be downloaded — an
+honest failure, not a frontend bug. **Demo Mode** (the toggle in the top
+bar) is the way to see the fully populated UI without depending on a
+real upload, network access, or a loaded road network; it's always
 clearly labeled and never silently substituted for real data.
 
 ## Project layout

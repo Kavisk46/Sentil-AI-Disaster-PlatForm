@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import type { AnalysisCapabilityMatch, Recommendation, SearchZone } from "@sentinelai/shared";
 
 import { IntelligencePanel } from "@/components/command-center/intelligence-panel";
@@ -268,6 +268,40 @@ describe("IntelligencePanel", () => {
     expect(
       within(limitations).getByText(/No ground-truth confirmation — every search zone/),
     ).toBeInTheDocument();
+  });
+
+  it("F6.1: falls back to internal state when selectedZoneId/onSelectZone are not provided (uncontrolled)", () => {
+    render(<IntelligencePanel {...baseProps()} />);
+    // The critical zone is the top zone and starts selected; clicking the
+    // moderate zone's button must switch the "Why" section to it without
+    // any controlling parent — internal `useState` still works exactly as
+    // before this milestone.
+    fireEvent.click(screen.getByText(/MODERATE \(0\.40\)/).closest("button")!);
+    expect(screen.getByText("Major damage observed.")).toBeInTheDocument();
+  });
+
+  it("F6.1: is controlled when selectedZoneId/onSelectZone are provided, so the map and panel can stay in sync", () => {
+    const onSelectZone = vi.fn();
+    const { rerender } = render(
+      <IntelligencePanel {...baseProps()} selectedZoneId={criticalZone.id} onSelectZone={onSelectZone} />,
+    );
+
+    // Clicking a zone calls the callback (e.g. to update `command-center.tsx`'s
+    // lifted state) rather than switching an internal state the caller
+    // can't see.
+    fireEvent.click(screen.getByText(/MODERATE \(0\.40\)/).closest("button")!);
+    expect(onSelectZone).toHaveBeenCalledWith(moderateZone.id);
+    // Since selection is controlled, the panel does NOT switch on its own —
+    // the "Why" section still reflects the `selectedZoneId` prop, which the
+    // parent hasn't changed yet in this test.
+    expect(screen.getByText("Destroyed structures observed.")).toBeInTheDocument();
+
+    // The parent applying the callback's result re-renders with the new
+    // controlled value, and the panel follows it.
+    rerender(
+      <IntelligencePanel {...baseProps()} selectedZoneId={moderateZone.id} onSelectZone={onSelectZone} />,
+    );
+    expect(screen.getByText("Major damage observed.")).toBeInTheDocument();
   });
 
   it("surfaces roads-unavailable as a limitation when route feasibility could not be assessed", () => {

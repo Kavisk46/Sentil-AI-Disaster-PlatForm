@@ -33,9 +33,17 @@ export function IncidentStatusBar({
   isDemoMode,
 }: IncidentStatusBarProps) {
   const severityStyle = severity ? INCIDENT_SEVERITY_STYLE[severity] : null;
+  // A restrained cinematic cue on the single highest-priority glance strip:
+  // a critical incident gets a faint red glow, never anything that would
+  // rely on color alone (the text/badge codes below already satisfy that).
+  const isCritical = severity === "critical";
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-white/10 bg-card/60 px-4 py-2.5 backdrop-blur-md">
+    <div
+      className={`glass-panel-elevated flex flex-wrap items-center gap-2 rounded-lg px-4 py-2.5 ${
+        isCritical ? "shadow-[0_0_32px_-8px_rgba(239,68,68,0.45)]" : ""
+      }`}
+    >
       {isDemoMode && (
         <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-400" variant="outline">
           Demo mode

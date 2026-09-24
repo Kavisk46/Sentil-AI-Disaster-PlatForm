@@ -62,11 +62,11 @@ export function LandingPage() {
 
         <main className="flex flex-1 flex-col items-center justify-center gap-8 px-4 py-16 text-center">
           <div className="flex flex-col items-center gap-3">
-            <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase">
+            <span className="border-primary/30 bg-primary/10 text-primary flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium tracking-wide uppercase">
               <ShieldAlert className="size-3.5" aria-hidden="true" />
               AI disaster-response command center
             </span>
-            <h1 className="text-hero text-4xl sm:text-6xl">SentinelAI</h1>
+            <h1 className="text-hero text-glow text-primary text-4xl sm:text-6xl">SentinelAI</h1>
             <p className="text-hero-sub text-muted-foreground max-w-xl text-base sm:text-lg">
               Upload disaster imagery to get damage intelligence, risk assessment, and rescue
               routing in one operational workspace.

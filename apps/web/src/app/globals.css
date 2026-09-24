@@ -13,45 +13,55 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  /* Command-center accent: a cyan-blue "sentinel" hue used for primary
+     actions, focus rings, and the hero glow — replaces the previous pure
+     grayscale primary so the product reads as an operational instrument,
+     not a generic admin panel. Risk/damage/priority colors (lib/risk-colors.ts)
+     are unaffected — this is only the brand/interaction accent. */
+  --primary: oklch(0.55 0.17 222);
+  --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --accent: oklch(0.95 0.03 222);
+  --accent-foreground: oklch(0.32 0.1 222);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.55 0.17 222 / 50%);
   --glass-bg: oklch(1 0 0 / 55%);
   --glass-border: oklch(0 0 0 / 8%);
   --glass-highlight: oklch(1 0 0 / 40%);
+  --sentinel-glow: oklch(0.55 0.17 222 / 22%);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  /* A true near-black (not the previous mid-gray oklch(0.145)), with a
+     faint cyan tint — the base the radial vignette below and every glass
+     panel are meant to sit on top of. */
+  --background: oklch(0.1 0.012 240);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.16 0.012 240);
+  --card-foreground: oklch(0.97 0 0);
+  --popover: oklch(0.16 0.012 240);
+  --popover-foreground: oklch(0.97 0 0);
+  --primary: oklch(0.78 0.14 205);
+  --primary-foreground: oklch(0.12 0.02 240);
+  --secondary: oklch(0.22 0.015 240);
+  --secondary-foreground: oklch(0.97 0 0);
+  --muted: oklch(0.22 0.015 240);
+  --muted-foreground: oklch(0.68 0.01 240);
+  --accent: oklch(0.26 0.03 210);
+  --accent-foreground: oklch(0.9 0.06 205);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --glass-bg: oklch(0.205 0 0 / 55%);
+  --ring: oklch(0.78 0.14 205 / 60%);
+  --glass-bg: oklch(0.18 0.015 240 / 55%);
   --glass-border: oklch(1 0 0 / 10%);
   --glass-highlight: oklch(1 0 0 / 6%);
+  --sentinel-glow: oklch(0.78 0.14 205 / 16%);
 }
 
 @theme inline {
@@ -87,6 +97,20 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Cinematic depth cue: a faint radial glow anchored near the top of
+       the viewport, on top of the solid --background color (never the
+       only background — see the artifact/theming rule this codebase
+       otherwise has no need of, but the same principle applies: always
+       paint a solid color first). No-op in light mode (near-invisible at
+       this opacity against a white background) and skipped entirely
+       under prefers-reduced-motion's cousin concern — it is static, not
+       animated, so no such guard is needed. */
+    background-image: radial-gradient(
+      ellipse 1200px 600px at 50% -10%,
+      var(--sentinel-glow),
+      transparent 60%
+    );
+    background-attachment: fixed;
   }
 }
 
@@ -125,4 +149,11 @@
 @utility text-hero-sub {
   letter-spacing: -0.01em;
   line-height: 1.4;
+}
+
+/* Subtle accent-colored glow behind hero/status text — a restrained
+   cinematic cue, not a neon effect. Text color is set by the caller
+   (e.g. `text-primary`); this utility only adds the glow. */
+@utility text-glow {
+  text-shadow: 0 0 40px var(--sentinel-glow);
 }

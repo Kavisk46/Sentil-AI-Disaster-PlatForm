@@ -66,11 +66,11 @@ export function TopBar() {
   const connectionTone = isError ? "text-destructive" : isPending ? "text-muted-foreground" : "text-emerald-400";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-background/80 px-4 backdrop-blur-md">
+    <header className="glass-panel-elevated relative z-20 flex h-14 shrink-0 items-center justify-between px-4">
       <nav aria-label="Primary" className="flex items-center gap-3">
-        <span className="text-sm font-semibold tracking-wide">SentinelAI</span>
+        <span className="text-primary text-sm font-semibold tracking-wide">SentinelAI</span>
         <span className="text-muted-foreground hidden text-xs sm:inline">
-          3D Disaster Command Center
+          Disaster Command Center
         </span>
       </nav>
 

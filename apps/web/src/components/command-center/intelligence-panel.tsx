@@ -59,6 +59,17 @@ export interface IntelligencePanelProps {
   resourcesAreDemo: boolean;
   roadsAvailable: boolean;
   roadsUnavailableReason: string | null;
+  /**
+   * F6.1: optional controlled selection, so the map (`command-map.tsx`)
+   * and this panel can stay in sync — clicking a zone on the map
+   * highlights it here, and vice versa. Both omitted (the panel's
+   * original behavior, and every existing test's) falls back to this
+   * component's own internal `useState`, so nothing controlled-mode-only
+   * breaks a caller that doesn't need synchronization (e.g. a future
+   * standalone usage, or a test rendering this panel in isolation).
+   */
+  selectedZoneId?: string | null;
+  onSelectZone?: (zoneId: string) => void;
   className?: string;
 }
 
@@ -262,9 +273,17 @@ export function IntelligencePanel({
   resourcesAreDemo,
   roadsAvailable,
   roadsUnavailableReason,
+  selectedZoneId: controlledSelectedZoneId,
+  onSelectZone,
   className,
 }: IntelligencePanelProps) {
-  const [selectedZoneId, setSelectedZoneId] = React.useState<string | null>(null);
+  const [internalSelectedZoneId, setInternalSelectedZoneId] = React.useState<string | null>(null);
+  // Controlled when the caller passes `selectedZoneId`/`onSelectZone`
+  // (`command-center.tsx`, so the map stays in sync); uncontrolled
+  // otherwise — see the prop's own doc comment.
+  const isControlled = controlledSelectedZoneId !== undefined;
+  const selectedZoneId = isControlled ? controlledSelectedZoneId : internalSelectedZoneId;
+  const setSelectedZoneId = isControlled ? (onSelectZone ?? (() => {})) : setInternalSelectedZoneId;
   const effectiveSelectedZoneId = selectedZoneId ?? topSearchZoneId ?? searchZones[0]?.id ?? null;
   const selectedZone = searchZones.find((zone) => zone.id === effectiveSelectedZoneId) ?? null;
 

@@ -3,6 +3,7 @@ import type {
   ConfidenceLevel,
   DamageClass,
   IncidentSeverity,
+  ResourceAvailability,
   RiskLevel,
   SearchPriorityLevel,
 } from "@sentinelai/shared";
@@ -155,6 +156,36 @@ export const CONFIDENCE_STYLE: Record<ConfidenceLevel, LevelStyle> = {
  * `RISK_LEVEL_STYLE` keeps the visual language consistent across panels
  * (same reasoning `INCIDENT_SEVERITY_STYLE` already applies above). */
 export const SEARCH_PRIORITY_STYLE: Record<SearchPriorityLevel, LevelStyle> = RISK_LEVEL_STYLE;
+
+/** F6.1: resource markers on the map. A closed vocabulary distinct from
+ * risk/damage color scales (availability is not a severity), matching the
+ * same "code + label + color" discipline as every other style table here. */
+export const RESOURCE_AVAILABILITY_STYLE: Record<ResourceAvailability, LevelStyle> = {
+  available: {
+    code: "AVAIL",
+    label: "Available",
+    hex: "#22c55e",
+    className: "text-emerald-400 border-emerald-500/40 bg-emerald-500/10",
+  },
+  deployed: {
+    code: "DEPL",
+    label: "Deployed",
+    hex: "#eab308",
+    className: "text-yellow-400 border-yellow-500/40 bg-yellow-500/10",
+  },
+  unavailable: {
+    code: "UNAV",
+    label: "Unavailable",
+    hex: "#64748b",
+    className: "text-slate-400 border-slate-500/40 bg-slate-500/10",
+  },
+  unknown: {
+    code: "UNK",
+    label: "Unknown",
+    hex: "#64748b",
+    className: "text-slate-500 border-slate-600/40 bg-slate-600/10",
+  },
+};
 
 export const ROUTE_MODE_STYLE = {
   risk_aware: { hex: "#38bdf8", label: "Risk-aware", className: "text-sky-400" },

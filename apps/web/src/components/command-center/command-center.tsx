@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { MapPinOff } from "lucide-react";
+import type { Resource } from "@sentinelai/shared";
 
 import { AnalysisWorkspace } from "@/components/command-center/analysis-workspace";
 import { IncidentStatusBar } from "@/components/command-center/incident-status-bar";
@@ -26,6 +27,7 @@ import {
   DEMO_INCIDENT_BRIEFING,
   DEMO_RECOMMENDATIONS,
   DEMO_RESOURCE_CANDIDATES,
+  DEMO_RESOURCES,
   DEMO_ROAD_RISK,
   DEMO_ROUTE_COMPARISON,
   DEMO_ROUTES,
@@ -119,6 +121,49 @@ export function CommandCenter() {
     : intelligenceRecommendations.data?.resource_candidates[0];
   const mapRecommendedRoute =
     topCandidate?.route_feasibility.status === "computed" ? (topCandidate.route ?? null) : null;
+  const topSearchZoneId = isDemoMode
+    ? (DEMO_SEARCH_ZONES[0]?.id ?? null)
+    : (intelligenceRecommendations.data?.top_search_zone_id ?? null);
+
+  // F6.1: lifted here (not owned by `IntelligencePanel` or
+  // `CommandMap` individually) so selecting a zone in either place stays
+  // in sync with the other — see both components' own doc comments.
+  // Reset whenever the active analysis/mode changes so a *new* incident
+  // never inherits a stale selection from a previous one.
+  const [selectedZoneId, setSelectedZoneId] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setSelectedZoneId(null);
+  }, [activeAnalysisId, isDemoMode]);
+
+  // F6.1: resource markers. Demo mode uses the full, richer
+  // `DEMO_RESOURCES` fixture (real type/capabilities/location for all
+  // three simulated assets). Real mode can only ever honestly derive one
+  // marker per candidate — the F3 capability-match response has no
+  // resource-location field of its own, only a computed route whose
+  // start point *is* that resource's real starting location (see
+  // `CommandMapProps.resources`'s doc comment) — built only from
+  // candidates whose route was actually found, never a fabricated
+  // position. `type`/`capabilities` are honestly left generic/empty
+  // rather than guessed; `is_simulated` passes through the real backend
+  // flag (today always `true` — no live resource-ingestion system exists
+  // yet, see `resourcesAreDemo` below).
+  const mapResources: Resource[] | null = isDemoMode
+    ? DEMO_RESOURCES
+    : (intelligenceRecommendations.data?.resource_candidates
+        .filter((candidate) => candidate.route?.found)
+        .map(
+          (candidate): Resource => ({
+            id: candidate.match.resource_id,
+            type: "other",
+            capabilities: [],
+            location: { type: "point", coordinates: candidate.route!.route_geometry[0]! },
+            location_crs: "EPSG:4326",
+            availability: candidate.match.is_available ? "available" : "unavailable",
+            capacity: null,
+            operational_constraints: [],
+            is_simulated: candidate.match.is_simulated,
+          }),
+        ) ?? null);
 
   return (
     <div className="flex flex-1 flex-col gap-4 p-4">
@@ -137,6 +182,10 @@ export function CommandCenter() {
             riskAwareRoute={riskAwareRoute}
             searchZones={mapSearchZones}
             recommendedRoute={mapRecommendedRoute}
+            topSearchZoneId={topSearchZoneId}
+            selectedZoneId={selectedZoneId}
+            onSelectZone={setSelectedZoneId}
+            resources={mapResources}
             routeStart={effectiveRouteStart}
             routeDestination={effectiveRouteDestination}
             onMapClick={
@@ -146,7 +195,13 @@ export function CommandCenter() {
             }
             className="absolute inset-0"
           />
-          <MapLegend />
+          <MapLegend
+            showResources={mapResources !== null && mapResources.length > 0}
+            hazardCount={isDemoMode ? null : (intelligenceContext.data?.hazard_count ?? null)}
+            infrastructureCount={
+              isDemoMode ? null : (intelligenceContext.data?.infrastructure_count ?? null)
+            }
+          />
           {!isDemoMode && (routeStart || routeDestination) && (
             <div className="absolute top-3 right-3 z-10">
               <Button
@@ -257,9 +312,9 @@ export function CommandCenter() {
               recommendationsErrorMessage: !isDemoMode
                 ? intelligenceRecommendations.error?.message
                 : undefined,
-              topSearchZoneId: isDemoMode
-                ? (DEMO_SEARCH_ZONES[0]?.id ?? null)
-                : (intelligenceRecommendations.data?.top_search_zone_id ?? null),
+              topSearchZoneId,
+              selectedZoneId,
+              onSelectZone: setSelectedZoneId,
               resourceView: {
                 kind: "candidates",
                 candidates: isDemoMode
